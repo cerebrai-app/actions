@@ -44,15 +44,17 @@ on:
           `targets`.
         type: string
         default: linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64
-      main-package:
-        description: Package of the program's main, relative to `working-directory`. Used by the smoke test.
+      main-packages:
+        description: >-
+          Space-separated main packages, relative to `working-directory`, for
+          the smoke test, e.g. `./cmd/brainctl ./cmd/workctl`.
         type: string
         default: .
       smoke-test-args:
         description: >-
           Arguments for a smoke test on every runner of the test job, e.g.
-          `version`: it runs `go run <main-package> <args>` and only checks that
-          it exits 0. Empty (the default, for libraries) skips it.
+          `version`: it runs `go run <package> <args>` for each of
+          `main-packages` and only checks that it exits 0. Empty (the default, for libraries) skips it.
         type: string
         default: ''
       govulncheck:
@@ -144,11 +146,14 @@ jobs:
       - name: Smoke test
         if: ${{ inputs.smoke-test-args != '' }}
         env:
-          MAIN_PACKAGE: ${{ inputs.main-package }}
+          MAIN_PACKAGES: ${{ inputs.main-packages }}
           SMOKE_TEST_ARGS: ${{ inputs.smoke-test-args }}
         run: |
+          read -ra packages <<< "$MAIN_PACKAGES"
           read -ra args <<< "$SMOKE_TEST_ARGS"
-          go run "$MAIN_PACKAGE" "${args[@]}"
+          for pkg in "${packages[@]}"; do
+            go run "$pkg" "${args[@]}"
+          done
 
   cross-build:
     name: Cross-build
