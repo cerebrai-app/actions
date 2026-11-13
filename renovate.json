@@ -1,16 +1,17 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": ["config:recommended", "helpers:pinGitHubActionDigests"],
-  "description": "Keeps the GitHub Actions pinned in the composite actions and workflows, the pinned ponytail plugin marketplace and the pinned Renovate image up to date. Only those are managed here.",
+  "description": "Keeps the GitHub Actions pinned in the composite actions and workflows, the pinned ponytail plugin marketplace and the pinned Renovate image and lint tools up to date. Only those are managed here.",
   "enabledManagers": ["github-actions", "custom.regex"],
   "customManagers": [
     {
-      "description": "Pinned versions annotated with a `# renovate:` comment: marketplace checkouts (`ref: <sha> # <tag>`) and the Renovate image (`renovate-version: <version>@<digest>`)",
+      "description": "Pinned versions annotated with a `# renovate:` comment: marketplace checkouts (`ref: <sha> # <tag>`), the Renovate image (`renovate-version: <version>@<digest>`) and lint tool versions (`<NAME>_VERSION: <version>`)",
       "customType": "regex",
       "managerFilePatterns": ["/^[^/]+/action\\.ya?ml$/", "/^\\.github/workflows/[^/]+\\.ya?ml$/"],
       "matchStrings": [
         "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\n\\s*ref: (?<currentDigest>[a-f0-9]{40}) # (?<currentValue>\\S+)",
-        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)(?: versioning=(?<versioning>\\S+))?\\n\\s*renovate-version: (?<currentValue>[^@\\s]+)@(?<currentDigest>sha256:[a-f0-9]{64})"
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)(?: versioning=(?<versioning>\\S+))?\\n\\s*renovate-version: (?<currentValue>[^@\\s]+)@(?<currentDigest>sha256:[a-f0-9]{64})",
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\n\\s*[A-Z_]+_VERSION: (?<currentValue>\\S+)"
       ]
     }
   ]

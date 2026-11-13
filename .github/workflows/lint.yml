@@ -1,0 +1,41 @@
+name: Lint
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  # renovate: datasource=go depName=github.com/rhysd/actionlint
+  ACTIONLINT_VERSION: v1.7.12
+  # renovate: datasource=pypi depName=check-jsonschema
+  CHECK_JSONSCHEMA_VERSION: 0.39.0
+
+jobs:
+  lint:
+    name: Lint workflows and actions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Workflows, including the `run:` scripts (shellcheck is preinstalled on
+      # the runner) and the inputs passed to local actions such as ./renovate.
+      - name: actionlint
+        run: |
+          go install "github.com/rhysd/actionlint/cmd/actionlint@$ACTIONLINT_VERSION"
+          "$(go env GOPATH)/bin/actionlint" -color
+
+      # actionlint does not read action.yml files, so check their structure
+      # against the published schema for action metadata.
+      - name: Validate action.yml schema
+        run: |
+          pipx run "check-jsonschema==$CHECK_JSONSCHEMA_VERSION" \
+            --builtin-schema vendor.github-actions ./*/action.yml
+
+      - name: shellcheck composite action scripts
+        run: python3 .github/scripts/shellcheck-actions.py
