@@ -9,7 +9,10 @@ name: Go release
 #   2. the GitHub Release, with the archives and checksums.txt as tested;
 #   3. optionally, the Homebrew casks and Scoop manifests from the caller's
 #      .goreleaser.yaml, pushed to tap/bucket repositories with a GitHub App
-#      token that can write to those repositories only.
+#      token that can write to those repositories only, after checking that
+#      GoReleaser's rebuild matches the released archives.
+#
+# Re-running a failed publish job is safe: an existing release is kept.
 #
 # Called from a pull request it builds a snapshot and publishes nothing, so a
 # change is checked before a release. See the README for a full caller.
@@ -185,9 +188,15 @@ jobs:
         with:
           subject-checksums: ${{ runner.temp }}/release/checksums.txt
 
+      # Skipped when the release exists, so this job can be re-run after a
+      # failure in step 3 (e.g. once the tap app secrets are fixed).
       - name: Create release
         run: |
           ls -l "$RUNNER_TEMP/release"
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "::notice::release $GITHUB_REF_NAME already exists; not creating it again"
+            exit 0
+          fi
           prerelease=()
           [[ "$GITHUB_REF_NAME" == *-* ]] && prerelease=(--prerelease)
           gh release create "$GITHUB_REF_NAME" "$RUNNER_TEMP"/release/* \
@@ -223,6 +232,28 @@ jobs:
           repositories: ${{ inputs.tap-repositories }}
           permission-contents: write
 
+      # The casks and manifests carry the checksums of GoReleaser's own build,
+      # so rebuild first (publishing nothing) and require the archives to match
+      # the released ones before anything is pushed to the tap repositories.
+      # (GoReleaser's before_publish hook would do this in one run, but it is
+      # a Pro feature.)
+      - name: Rebuild without publishing
+        if: ${{ steps.tap-token.outputs.token != '' }}
+        uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
+        with:
+          version: ${{ env.GORELEASER_VERSION }}
+          workdir: ${{ inputs.working-directory }}
+          args: release --clean --skip=publish
+
+      - name: Rebuilt archives must match the release
+        if: ${{ steps.tap-token.outputs.token != '' }}
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          if ! diff -u "$RUNNER_TEMP/release/checksums.txt" dist/checksums.txt; then
+            echo "::error::the rebuild for the casks and manifests differs from the released archives, so nothing was pushed to the tap repositories; check that .goreleaser.yaml builds reproducibly"
+            exit 1
+          fi
+
       - name: Publish casks and manifests
         if: ${{ steps.tap-token.outputs.token != '' }}
         uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
@@ -234,14 +265,12 @@ jobs:
           GITHUB_TOKEN: ${{ steps.tap-token.outputs.token }}
           TAP_GITHUB_TOKEN: ${{ steps.tap-token.outputs.token }}
 
-      # The casks and manifests carry the checksums of this rebuild. If they
-      # differ from the released archives, brew and scoop refuse to install
-      # (their checksum check fails), so fail loudly here too.
-      - name: Rebuilt archives must match the release
+      # Same check on the build that was actually published.
+      - name: Published checksums must match the release
         if: ${{ steps.tap-token.outputs.token != '' }}
         working-directory: ${{ inputs.working-directory }}
         run: |
           if ! diff -u "$RUNNER_TEMP/release/checksums.txt" dist/checksums.txt; then
-            echo "::error::the rebuild for the casks and manifests differs from the released archives; check that .goreleaser.yaml builds reproducibly"
+            echo "::error::the casks and manifests just published carry checksums that differ from the released archives, so brew and scoop will refuse to install them; check that .goreleaser.yaml builds reproducibly"
             exit 1
           fi
