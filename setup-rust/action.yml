@@ -9,7 +9,10 @@ inputs:
     description: >-
       Toolchain to install, e.g. `stable` or `1.85`. `msrv` reads the
       `rust-version` from Cargo.toml (every package in a workspace must declare
-      the same one).
+      the same one). The action always exports `RUSTUP_TOOLCHAIN` set to this
+      toolchain for the rest of the job, so it wins over a `rust-toolchain.toml`
+      in the repository (which would otherwise take precedence over rustup's
+      default). Set `RUSTUP_TOOLCHAIN` in a later step's `env` to override it.
     required: false
     default: stable
   components:
@@ -83,6 +86,19 @@ runs:
         targets: >-
           ${{ (inputs.cross-aarch64-linux != 'true' || contains(inputs.targets, 'aarch64-unknown-linux-gnu')) && inputs.targets
           || (inputs.targets != '' && format('{0}, aarch64-unknown-linux-gnu', inputs.targets) || 'aarch64-unknown-linux-gnu') }}
+
+    # dtolnay/rust-toolchain only runs `rustup default`, and a rust-toolchain.toml
+    # beats that, so the msrv job would silently build on stable. RUSTUP_TOOLCHAIN
+    # beats rust-toolchain.toml.
+    - name: Use the installed toolchain for the rest of the job
+      shell: bash
+      env:
+        RUSTUP_TOOLCHAIN: ${{ steps.resolve.outputs.toolchain }}
+      run: |
+        set -euo pipefail
+        echo "RUSTUP_TOOLCHAIN=$RUSTUP_TOOLCHAIN" >> "$GITHUB_ENV"
+        rustc --version
+        cargo --version
 
     - if: ${{ inputs.cache == 'true' }}
       uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
