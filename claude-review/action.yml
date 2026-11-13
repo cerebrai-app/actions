@@ -1,0 +1,28 @@
+name: Claude code review
+description: >-
+  Check out the repository and review the current pull request with the
+  code-review plugin. Run it from a `pull_request` workflow, in a job with
+  contents, pull-requests and issues read and id-token write.
+
+inputs:
+  claude-code-oauth-token:
+    description: Claude Code OAuth token (pass `secrets.CLAUDE_CODE_OAUTH_TOKEN`).
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Checkout repository
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        fetch-depth: 1
+
+    - name: Run Claude Code Review
+      uses: anthropics/claude-code-action@4fa93a88de49bbef68b10eb15aabedf28ca0e1ed # v1.0.271
+      with:
+        claude_code_oauth_token: ${{ inputs.claude-code-oauth-token }}
+        # Not pinned: the action only takes URLs ending in .git (no ref), and Claude Code
+        # rejects a local copy of the reserved `claude-code-plugins` marketplace name.
+        plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
+        plugins: 'code-review@claude-code-plugins'
+        prompt: '/code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }}'

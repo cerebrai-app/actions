@@ -1,0 +1,42 @@
+name: Minimize old ponytail reviews
+description: >-
+  Collapse earlier ponytail reports on a pull request as "outdated", so only the
+  newest one stays open. Run it in its own job with issues and pull-requests
+  write (not in the job that runs the plugin), after a successful
+  ponytail-review, so a failed review never hides the last report.
+
+inputs:
+  github-token:
+    description: Token that can minimize comments on the pull request.
+    default: ${{ github.token }}
+  pr-number:
+    description: The pull request number.
+    default: ${{ github.event.pull_request.number }}
+
+runs:
+  using: composite
+  steps:
+    - name: Minimize all but the newest ponytail report
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        PR_NUMBER: ${{ inputs.pr-number }}
+      run: |
+        set -euo pipefail
+        reports=$(mktemp)
+        # Ponytail reports are claude[bot] comments that start with the marker.
+        # Reports posted before the marker existed are recognised by their
+        # closing "Verdict" and "Lean:" lines.
+        select='.[] | select(.user.login == "claude[bot]")
+          | select((.body | startswith("<!-- ponytail-review -->"))
+                   or ((.body | contains("Verdict")) and (.body | contains("Lean:"))))
+          | [.created_at, .node_id, .id] | @tsv'
+        gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" --jq "$select" | sort > "$reports"
+        echo "$(wc -l < "$reports") ponytail report(s) on #$PR_NUMBER"
+        # Everything except the newest (the last line after sorting by time).
+        head -n -1 "$reports" | while IFS=$'\t' read -r created node_id id; do
+          gh api graphql \
+            -f query='mutation($id: ID!) { minimizeComment(input: {subjectId: $id, classifier: OUTDATED}) { minimizedComment { isMinimized } } }' \
+            -f id="$node_id" > /dev/null
+          echo "minimized comment $id ($created)"
+        done

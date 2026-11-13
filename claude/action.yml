@@ -1,0 +1,29 @@
+name: Claude Code
+description: >-
+  Check out the repository and run Claude Code on an @claude mention. The caller
+  decides when to run (the `if:` on mentions) and grants the job's permissions:
+  contents, pull-requests and issues read, id-token write, and actions read so
+  Claude can read CI results on PRs.
+
+inputs:
+  claude-code-oauth-token:
+    description: Claude Code OAuth token (pass `secrets.CLAUDE_CODE_OAUTH_TOKEN`).
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Checkout repository
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        fetch-depth: 1
+
+    - name: Run Claude Code
+      uses: anthropics/claude-code-action@4fa93a88de49bbef68b10eb15aabedf28ca0e1ed # v1.0.271
+      with:
+        claude_code_oauth_token: ${{ inputs.claude-code-oauth-token }}
+        # Lets Claude read CI results on PRs (needs `actions: read` on the job).
+        additional_permissions: |
+          actions: read
+        # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
+        # or https://code.claude.com/docs/en/cli-reference for available options
