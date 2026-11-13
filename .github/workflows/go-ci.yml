@@ -1,0 +1,201 @@
+name: Go CI
+
+# Reusable CI for a Go module. Call it from a workflow that runs on pull
+# requests and pushes to main (see the README for a full caller):
+#
+#   jobs:
+#     ci:
+#       uses: cerebrai-app/actions/.github/workflows/go-ci.yml@<commit sha> # v1
+#       with:
+#         smoke-test-args: version
+#
+# Jobs:
+#   lint        gofmt, `go mod tidy -diff` and golangci-lint, on the latest stable Go
+#   test        build and test on every runner in `os`, on the latest stable Go
+#   min-go      build and test with exactly the `go` version from go.mod, so the
+#               declared minimum is a tested one
+#   govulncheck known vulnerabilities in the code paths the module actually calls
+#
+# GOTOOLCHAIN=local everywhere: Go must not quietly download another toolchain
+# (for a `toolchain` line in go.mod, say), or the min-go job would not test the
+# version it claims to. A go.mod that needs a newer Go than installed fails.
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: Directory with the module's go.mod, relative to the repository root.
+        type: string
+        default: .
+      os:
+        description: >-
+          JSON list of runners for the test job. `ubuntu-24.04-arm` is a native
+          arm64 Linux runner (free for public repositories); a private
+          repository without access to it can pass a list without it.
+        type: string
+        default: '["ubuntu-latest", "ubuntu-24.04-arm", "macos-latest", "windows-latest"]'
+      main-package:
+        description: Package of the program's main, relative to `working-directory`. Used by the smoke test.
+        type: string
+        default: .
+      smoke-test-args:
+        description: >-
+          Arguments for a smoke test on every runner of the test job, e.g.
+          `version`: it runs `go run <main-package> <args>` and only checks that
+          it exits 0. Empty (the default, for libraries) skips it.
+        type: string
+        default: ''
+      govulncheck:
+        description: Run govulncheck.
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+env:
+  GOTOOLCHAIN: local
+  # Pinned here so every caller gets the same tools; Renovate bumps them in this
+  # repository and callers pick them up when they bump their pin.
+  # renovate: datasource=github-releases depName=golangci/golangci-lint
+  GOLANGCI_LINT_VERSION: v2.15.0
+  # renovate: datasource=go depName=golang.org/x/vuln
+  GOVULNCHECK_VERSION: v1.9.0
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: stable
+          cache-dependency-path: |
+            ${{ inputs.working-directory }}/go.mod
+            ${{ inputs.working-directory }}/go.sum
+
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [[ -n "$unformatted" ]]; then
+            echo "::error::these files are not gofmt-formatted (run gofmt -w .):"
+            echo "$unformatted"
+            gofmt -d .
+            exit 1
+          fi
+
+      # The go.mod/go.sum counterpart of `cargo --locked`: a PR that changes
+      # imports must commit the matching go.mod and go.sum.
+      - name: go mod tidy
+        run: go mod tidy -diff
+
+      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: ${{ env.GOLANGCI_LINT_VERSION }}
+          working-directory: ${{ inputs.working-directory }}
+
+  test:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON(inputs.os) }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: stable
+          cache-dependency-path: |
+            ${{ inputs.working-directory }}/go.mod
+            ${{ inputs.working-directory }}/go.sum
+
+      - run: go build ./...
+
+      # The race detector needs cgo, and so a C compiler, which the Windows
+      # runner does not set up for Go; elsewhere every test runs with it.
+      - run: go test ${{ runner.os != 'Windows' && '-race' || '' }} ./...
+
+      - name: Smoke test
+        if: ${{ inputs.smoke-test-args != '' }}
+        env:
+          MAIN_PACKAGE: ${{ inputs.main-package }}
+          SMOKE_TEST_ARGS: ${{ inputs.smoke-test-args }}
+        run: |
+          read -ra args <<< "$SMOKE_TEST_ARGS"
+          go run "$MAIN_PACKAGE" "${args[@]}"
+
+  min-go:
+    name: Test (go version in go.mod)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Not go-version-file: setup-go prefers a `toolchain` line over the `go`
+      # line, and only the `go` line is the minimum.
+      - name: Read the go version from go.mod
+        id: min
+        run: |
+          version=$(awk '$1 == "go" { print $2; exit }' go.mod)
+          if [[ -z "$version" ]]; then
+            echo "::error::no go line in go.mod"
+            exit 1
+          fi
+          echo "go.mod requires go $version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ steps.min.outputs.version }}
+          cache-dependency-path: |
+            ${{ inputs.working-directory }}/go.mod
+            ${{ inputs.working-directory }}/go.sum
+
+      - run: go version
+      - run: go build ./...
+      - run: go test ./...
+
+  govulncheck:
+    name: govulncheck
+    if: ${{ inputs.govulncheck }}
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: stable
+          cache-dependency-path: |
+            ${{ inputs.working-directory }}/go.mod
+            ${{ inputs.working-directory }}/go.sum
+
+      # Checks against the latest stable Go, which is what releases are built
+      # with, so a standard library fix only needs a new release, not a code change.
+      - run: go run "golang.org/x/vuln/cmd/govulncheck@$GOVULNCHECK_VERSION" ./...

@@ -13,6 +13,15 @@ Composite GitHub Actions shared by the cerebrai-app repositories.
 
 Each `action.yml` documents its inputs.
 
+There are also reusable workflows for Go repositories, which hold whole jobs rather than steps:
+
+| Workflow | What it does |
+| --- | --- |
+| [`go-ci.yml`](.github/workflows/go-ci.yml) | gofmt, `go mod tidy -diff`, golangci-lint, `go test -race` on Linux (x86_64 and arm64), macOS and Windows, a test with the `go` version from go.mod, and govulncheck |
+| [`go-release.yml`](.github/workflows/go-release.yml) | On a `v*` tag: tests, cross-compiles a binary per platform, runs each one on its own platform, and publishes them with `.sha256` files as a GitHub Release |
+
+Their inputs are documented at the top of each file. See [Go repositories](#go-repositories) for callers.
+
 ## What stays in the calling workflow
 
 A composite action is a list of steps, so the following can't move into it and stay in each
@@ -40,6 +49,88 @@ Full callers:
 [claude-code-review.yml](https://github.com/cerebrai-app/brainctl/blob/main/.github/workflows/claude-code-review.yml),
 [renovate.yml](https://github.com/cerebrai-app/brainctl/blob/main/.github/workflows/renovate.yml),
 [ci.yml](https://github.com/cerebrai-app/brainctl/blob/main/.github/workflows/ci.yml) in brainctl.
+
+## Go repositories
+
+A Go repository calls the reusable workflows for CI and releases, and the composite actions
+above for Claude and Renovate, as any other repository does. Shared Go code, such as the
+`buildinfo` package that the release workflow links the version into, lives in
+[go-cerebrai](https://github.com/cerebrai-app/go-cerebrai).
+
+`.github/workflows/ci.yml`:
+
+```yaml
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    uses: cerebrai-app/actions/.github/workflows/go-ci.yml@<commit sha> # v1
+    with:
+      smoke-test-args: version # omit for a library
+```
+
+`.github/workflows/release.yml`:
+
+```yaml
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths: [".github/workflows/release.yml"] # builds everything, publishes nothing
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    uses: cerebrai-app/actions/.github/workflows/go-release.yml@<commit sha> # v1
+    permissions:
+      contents: write # the publish job creates the release
+    with:
+      binary-name: brainctl
+```
+
+The program prints `<binary-name> <version>` for `<binary-name> version`: the release workflow
+runs every binary with `version` before publishing it and checks that output. It links the
+version from the tag into `github.com/cerebrai-app/go-cerebrai/buildinfo.version`, so the program
+gets it from `buildinfo.Version()`. A program with its own variable sets `version-variable`, for
+example to `main.version`.
+
+The archives are named `<binary-name>-v<version>-<goos>-<goarch>.tar.gz` (`.zip` for Windows).
+Binaries are built with cgo off, so the Linux ones are static and run on any distribution.
+
+The default runners include `ubuntu-24.04-arm`, a native arm64 Linux runner that is free for
+public repositories. A private repository without arm64 runners passes `os` (CI) and `targets`
+(release) without it.
+
+`renovate.json`, for the Go modules and the pinned actions and workflows:
+
+```json
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended", "helpers:pinGitHubActionDigests"],
+  "enabledManagers": ["gomod", "github-actions"],
+  "postUpdateOptions": ["gomodTidy"]
+}
+```
+
+`go-ci.yml` sets `GOTOOLCHAIN=local`, so Go never downloads a different toolchain: CI tests
+with the latest stable Go, and with exactly the `go` version from go.mod. The `go` line is the
+minimum supported Go version. Raise it only when the code or a dependency needs a newer
+release, and keep it within the [releases Go supports](https://go.dev/doc/devel/release#policy).
+
+[`test-go-workflows.yml`](.github/workflows/test-go-workflows.yml) runs both workflows against
+[`testdata/go-app`](testdata/go-app) on every pull request here.
 
 ## Releasing
 
