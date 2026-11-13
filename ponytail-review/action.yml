@@ -1,0 +1,48 @@
+name: Ponytail review
+description: >-
+  Check out the repository and review the current pull request with the
+  third-party ponytail plugin, which posts its report as one PR comment starting
+  with `<!-- ponytail-review -->`. Run it from a `pull_request` workflow, in a job
+  with only contents, pull-requests and issues read and id-token write: the
+  plugin should not get write access. Follow it with minimize-ponytail-reviews
+  in a separate job.
+
+inputs:
+  claude-code-oauth-token:
+    description: Claude Code OAuth token (pass `secrets.CLAUDE_CODE_OAUTH_TOKEN`).
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Checkout repository
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        fetch-depth: 1
+
+    # The action only accepts marketplace URLs ending in .git, which can't carry
+    # a ref, so the ponytail marketplace is checked out at a pinned commit and
+    # passed as a local path instead. Renovate keeps `ref` up to date. This must
+    # come after the repository checkout, which would otherwise delete it.
+    - name: Checkout ponytail plugin marketplace
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        repository: DietrichGebert/ponytail
+        # renovate: datasource=github-tags depName=DietrichGebert/ponytail
+        ref: 7801d061243d7b753bad0e0b3c057cd250b11755 # v5.3.3
+        path: .marketplaces/ponytail
+        fetch-depth: 1
+        persist-credentials: false
+
+    - name: Run ponytail review
+      uses: anthropics/claude-code-action@4fa93a88de49bbef68b10eb15aabedf28ca0e1ed # v1.0.271
+      with:
+        claude_code_oauth_token: ${{ inputs.claude-code-oauth-token }}
+        plugin_marketplaces: ${{ github.workspace }}/.marketplaces/ponytail
+        plugins: 'ponytail@ponytail'
+        prompt: |
+          /ponytail:ponytail-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }}
+
+          When the review is done, post the full report as a single comment on the pull request with `gh pr comment`.
+          Start the comment with the line `<!-- ponytail-review -->` (an HTML comment, not shown on the page), then the report.
+        claude_args: '--allowedTools "Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"'

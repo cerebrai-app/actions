@@ -1,0 +1,90 @@
+name: Set up Rust
+description: >-
+  Install a Rust toolchain, optionally restore the cargo cache, and optionally
+  set up cross-compiling to arm64 Linux (aarch64-unknown-linux-gnu) with tests
+  and `cargo run` going through QEMU user-mode emulation.
+
+inputs:
+  toolchain:
+    description: >-
+      Toolchain to install, e.g. `stable` or `1.85`. `msrv` reads the
+      `rust-version` from Cargo.toml (every package in a workspace must declare
+      the same one).
+    required: false
+    default: stable
+  components:
+    description: Extra components, comma separated, e.g. `rustfmt, clippy`.
+    required: false
+    default: ''
+  targets:
+    description: Extra targets, comma separated.
+    required: false
+    default: ''
+  cache:
+    description: >-
+      'true' restores and saves the cargo cache. Use 'false' for jobs that build
+      published binaries, so a poisoned cache entry cannot end up in a release.
+    required: false
+    default: 'true'
+  cache-key:
+    description: Extra cache key, to keep caches for different targets apart.
+    required: false
+    default: ''
+  cross-aarch64-linux:
+    description: >-
+      'true' installs the aarch64 Linux cross toolchain and QEMU (on an Ubuntu
+      runner), adds the target, and points cargo's linker and test runner at them.
+    required: false
+    default: 'false'
+
+outputs:
+  toolchain:
+    description: The toolchain that was installed (the resolved version for `msrv`).
+    value: ${{ steps.resolve.outputs.toolchain }}
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve toolchain
+      id: resolve
+      shell: bash
+      env:
+        TOOLCHAIN: ${{ inputs.toolchain }}
+      run: |
+        set -euo pipefail
+        if [[ "$TOOLCHAIN" == "msrv" ]]; then
+          TOOLCHAIN=$(cargo metadata --no-deps --format-version 1 \
+            | jq -r '[.packages[].rust_version] | unique | if length == 1 then .[0] else "mixed" end')
+          if [[ -z "$TOOLCHAIN" || "$TOOLCHAIN" == "null" || "$TOOLCHAIN" == "mixed" ]]; then
+            echo "::error::every package needs the same rust-version in Cargo.toml (got: $TOOLCHAIN)"
+            exit 1
+          fi
+        fi
+        echo "toolchain=$TOOLCHAIN" >> "$GITHUB_OUTPUT"
+
+    - name: Install aarch64 Linux cross toolchain
+      if: ${{ inputs.cross-aarch64-linux == 'true' }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        sudo apt-get update
+        sudo apt-get install -y gcc-aarch64-linux-gnu qemu-user
+        {
+          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc"
+          echo "CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc"
+          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUNNER=qemu-aarch64 -L /usr/aarch64-linux-gnu"
+        } >> "$GITHUB_ENV"
+
+    - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      with:
+        toolchain: ${{ steps.resolve.outputs.toolchain }}
+        components: ${{ inputs.components }}
+        # With cross-aarch64-linux, add the arm64 target unless it is already listed.
+        targets: >-
+          ${{ (inputs.cross-aarch64-linux != 'true' || contains(inputs.targets, 'aarch64-unknown-linux-gnu')) && inputs.targets
+          || (inputs.targets != '' && format('{0}, aarch64-unknown-linux-gnu', inputs.targets) || 'aarch64-unknown-linux-gnu') }}
+
+    - if: ${{ inputs.cache == 'true' }}
+      uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      with:
+        key: ${{ inputs.cache-key }}

@@ -1,0 +1,63 @@
+name: Renovate
+description: >-
+  Run self-hosted Renovate on the current repository, authenticated as a GitHub
+  App. The repository needs a renovate.json (onboarding is off and a config is
+  required). Without an app client ID this only prints a warning, so a repository
+  can adopt the workflow before its secrets exist.
+
+  The app must be installed on the repository with read/write on Contents,
+  Issues, Pull requests and Workflows, and read on Dependabot alerts (used for
+  security updates). The built-in GITHUB_TOKEN cannot get the `workflows`
+  permission, so it cannot update files under .github/workflows.
+
+inputs:
+  app-client-id:
+    description: The app's Client ID ("Iv..."; pass `secrets.RENOVATE_APP_CLIENT_ID`). Empty skips the run.
+    required: false
+    default: ''
+  app-private-key:
+    description: The app's private key, the whole .pem file (pass `secrets.RENOVATE_APP_PRIVATE_KEY`).
+    required: false
+    default: ''
+  dry-run:
+    description: "'true' logs what would change without opening PRs."
+    required: false
+    default: 'false'
+
+runs:
+  using: composite
+  steps:
+    - name: Warn when the app credentials are missing
+      if: ${{ inputs.app-client-id == '' }}
+      shell: bash
+      run: echo "::warning::Secret RENOVATE_APP_CLIENT_ID is not set, so Renovate was skipped. See https://github.com/cerebrai-app/actions/tree/main/renovate."
+
+    - name: Create app token
+      id: app-token
+      if: ${{ inputs.app-client-id != '' }}
+      uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+      with:
+        client-id: ${{ inputs.app-client-id }}
+        private-key: ${{ inputs.app-private-key }}
+        # Only what Renovate needs, even if the app is granted more.
+        permission-contents: write
+        permission-issues: write
+        permission-pull-requests: write
+        permission-vulnerability-alerts: read
+        permission-workflows: write
+
+    - name: Run Renovate
+      if: ${{ steps.app-token.outputs.token != '' }}
+      uses: renovatebot/github-action@266fef21329c44765ad42f9dea1f01f5d2d91084 # v46.3.13
+      with:
+        token: ${{ steps.app-token.outputs.token }}
+        # The Renovate image runs with the app token, so it is pinned by digest.
+        # Renovate updates the version and digest together (see renovate.json).
+        # renovate: datasource=docker depName=ghcr.io/renovatebot/renovate versioning=semver
+        renovate-version: 44.225.1@sha256:eec896cbc3a745b5144c1547360e8197efcd0f949a688a8a63605ee4db8590d0
+      env:
+        RENOVATE_REPOSITORIES: ${{ github.repository }}
+        RENOVATE_ONBOARDING: 'false'
+        RENOVATE_REQUIRE_CONFIG: 'required'
+        RENOVATE_DRY_RUN: ${{ inputs.dry-run == 'true' && 'full' || '' }}
+        LOG_LEVEL: info
