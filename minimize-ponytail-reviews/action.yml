@@ -35,7 +35,7 @@ runs:
         echo "$(wc -l < "$reports") ponytail report(s) on #$PR_NUMBER"
         # Everything except the newest (the last line after sorting by time).
         head -n -1 "$reports" | while IFS=$'\t' read -r created node_id id; do
-          # \$id is a GraphQL variable, not a shell one, so the single quotes are intended.
+          # $id is a GraphQL variable, not a shell one, so the single quotes are intended.
           # shellcheck disable=SC2016
           gh api graphql \
             -f query='mutation($id: ID!) { minimizeComment(input: {subjectId: $id, classifier: OUTDATED}) { minimizedComment { isMinimized } } }' \
