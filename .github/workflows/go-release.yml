@@ -1,8 +1,9 @@
 name: Go release
 
-# Reusable release for a Go program. On a tag like v1.2.3 it tests the tagged
-# commit, cross-compiles a binary for each target on one ubuntu-latest runner,
-# and publishes them as a GitHub Release. Called from a pull request it does
+# Reusable release for one or more Go programs that share a version. On a tag
+# like v1.2.3 it tests the tagged commit, cross-compiles every program for each
+# target on one ubuntu-latest runner, and publishes them all as one GitHub
+# Release. Called from a pull request it does
 # everything except publish, so a change to the caller is checked before a
 # release. See the README for a full caller:
 #
@@ -12,7 +13,7 @@ name: Go release
 #       permissions:
 #         contents: write # the publish job creates the release
 #       with:
-#         binary-name: brainctl
+#         main-packages: ./cmd/brainctl ./cmd/workctl
 #
 # The version comes from the tag (v1.2.3 -> 1.2.3) and is linked into the binary
 # with `-ldflags -X <version-variable>=<version>`. Outside a tag it is 0.0.0-dev.
@@ -20,34 +21,34 @@ name: Go release
 on:
   workflow_call:
     inputs:
-      binary-name:
-        description: Name of the binary, and the first part of each archive name.
-        type: string
-        required: true
       working-directory:
         description: Directory with the module's go.mod, relative to the repository root.
         type: string
         default: .
-      main-package:
-        description: Package of the program's main, relative to `working-directory`.
+      main-packages:
+        description: >-
+          Space-separated main packages to release, relative to
+          `working-directory`, e.g. `./cmd/brainctl ./cmd/workctl`. Each binary
+          is named after the last element of its import path, as `go build`
+          names it (`.` takes the module's name).
         type: string
         default: .
       version-variable:
         description: >-
           Fully qualified string variable the version is linked into. The
-          default is go-cerebrai's buildinfo package; a program with its own
+          default is go-cerebrai's internal/buildinfo package; a program with its own
           variable passes e.g. `main.version`.
         type: string
-        default: github.com/cerebrai-app/go-cerebrai/buildinfo.version
+        default: github.com/cerebrai-app/go-cerebrai/internal/buildinfo.version
       smoke-test-args:
         description: >-
-          Arguments to run the linux/amd64 binary with before anything is
-          published (the runner can only run that one). Its output must be
-          exactly `<binary-name> <version>`. Empty skips it.
+          Arguments to run each linux/amd64 binary with before anything is
+          published (the runner can only run those). The output must be
+          exactly `<binary name> <version>`. Empty skips it.
         type: string
         default: version
       extra-files:
-        description: Space-separated files, relative to `working-directory`, to put next to the binary in each archive.
+        description: Space-separated files, relative to `working-directory`, to put next to the binary in every archive.
         type: string
         default: README.md LICENSE
       targets:
@@ -119,10 +120,9 @@ jobs:
 
       - name: Build and package
         env:
-          BIN: ${{ inputs.binary-name }}
           VERSION: ${{ steps.version.outputs.version }}
           TARGETS: ${{ inputs.targets }}
-          MAIN_PACKAGE: ${{ inputs.main-package }}
+          MAIN_PACKAGES: ${{ inputs.main-packages }}
           VERSION_VARIABLE: ${{ inputs.version-variable }}
           EXTRA_FILES: ${{ inputs.extra-files }}
           SMOKE_TEST_ARGS: ${{ inputs.smoke-test-args }}
@@ -130,50 +130,71 @@ jobs:
         run: |
           set -euo pipefail
           read -ra targets <<< "$TARGETS"
+          read -ra packages <<< "$MAIN_PACKAGES"
           read -ra extra <<< "$EXTRA_FILES"
           read -ra smoke_args <<< "$SMOKE_TEST_ARGS"
+
+          # Name each binary as `go build` would, and refuse anything that is
+          # not a main package (or two packages that would share a name).
+          declare -A bin_of=() seen=()
+          for pkg in "${packages[@]}"; do
+            info=$(go list -f '{{.Name}} {{.ImportPath}}' "$pkg")
+            if [[ "${info%% *}" != main ]]; then
+              echo "::error::$pkg is package ${info%% *}, not a main package"
+              exit 1
+            fi
+            bin=${info##*/}
+            if [[ -n "${seen[$bin]:-}" ]]; then
+              echo "::error::$pkg and ${seen[$bin]} would both build a binary named $bin"
+              exit 1
+            fi
+            seen[$bin]=$pkg
+            bin_of[$pkg]=$bin
+          done
+
           rm -rf stage dist
           mkdir -p stage dist
-          smoke_tested=false
           for target in "${targets[@]}"; do
             goos=${target%/*}
             goarch=${target#*/}
-            name="$BIN-v$VERSION-$goos-$goarch"
-            exe="$BIN"
-            [[ "$goos" == windows ]] && exe="$BIN.exe"
-            echo "::group::$target"
-            mkdir -p "stage/$name"
-            GOOS=$goos GOARCH=$goarch go build -trimpath \
-              -ldflags "-s -w -X $VERSION_VARIABLE=$VERSION" \
-              -o "stage/$name/$exe" "$MAIN_PACKAGE"
+            for pkg in "${packages[@]}"; do
+              bin=${bin_of[$pkg]}
+              name="$bin-v$VERSION-$goos-$goarch"
+              exe="$bin"
+              [[ "$goos" == windows ]] && exe="$bin.exe"
+              echo "::group::$bin $target"
+              mkdir -p "stage/$name"
+              GOOS=$goos GOARCH=$goarch go build -trimpath \
+                -ldflags "-s -w -X $VERSION_VARIABLE=$VERSION" \
+                -o "stage/$name/$exe" "$pkg"
 
-            # Run the binary that is about to be published, where the runner
-            # can: it must start and report its own version, which also proves
-            # the version made it into the binary.
-            if [[ "$target" == linux/amd64 ]] && (( ${#smoke_args[@]} )); then
-              out=$("./stage/$name/$exe" "${smoke_args[@]}")
-              echo "$out"
-              if [[ "$out" != "$BIN $VERSION" ]]; then
-                echo "::error::expected \"$BIN $VERSION\" from $BIN ${smoke_args[*]}, got \"$out\""
-                exit 1
+              # Run each binary that is about to be published, where the
+              # runner can: it must start and report its own version, which
+              # also proves the version made it into the binary.
+              if [[ "$target" == linux/amd64 ]] && (( ${#smoke_args[@]} )); then
+                out=$("./stage/$name/$exe" "${smoke_args[@]}")
+                echo "$out"
+                if [[ "$out" != "$bin $VERSION" ]]; then
+                  echo "::error::expected \"$bin $VERSION\" from $bin ${smoke_args[*]}, got \"$out\""
+                  exit 1
+                fi
               fi
-              smoke_tested=true
-            fi
 
-            if (( ${#extra[@]} )); then
-              cp "${extra[@]}" "stage/$name/"
-            fi
-            if [[ "$goos" == windows ]]; then
-              file="$name.zip"
-              (cd stage && zip -qr "../dist/$file" "$name")
-            else
-              file="$name.tar.gz"
-              tar czf "dist/$file" -C stage "$name"
-            fi
-            (cd dist && sha256sum "$file" > "$file.sha256")
-            echo "::endgroup::"
+              if (( ${#extra[@]} )); then
+                cp "${extra[@]}" "stage/$name/"
+              fi
+              if [[ "$goos" == windows ]]; then
+                file="$name.zip"
+                (cd stage && zip -qr "../dist/$file" "$name")
+              else
+                file="$name.tar.gz"
+                tar czf "dist/$file" -C stage "$name"
+              fi
+              (cd dist && sha256sum "$file" > "$file.sha256")
+              echo "::endgroup::"
+            done
           done
-          if (( ${#smoke_args[@]} )) && [[ "$smoke_tested" != true ]]; then
+          if (( ${#smoke_args[@]} )) && [[ " ${targets[*]} " != *" linux/amd64 "* ]]; then
             echo "::warning::no linux/amd64 target, so no binary was smoke-tested"
           fi
           ls -l dist

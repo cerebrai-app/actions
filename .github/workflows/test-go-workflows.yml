@@ -17,6 +17,7 @@ jobs:
     uses: ./.github/workflows/go-ci.yml
     with:
       working-directory: testdata/go-app
+      main-packages: . ./cmd/go-tool
       smoke-test-args: version
 
   release:
@@ -26,7 +27,7 @@ jobs:
     permissions:
       contents: write
     with:
-      binary-name: go-app
       working-directory: testdata/go-app
+      main-packages: . ./cmd/go-tool
       version-variable: main.version
       extra-files: README.md

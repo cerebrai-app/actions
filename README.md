@@ -18,7 +18,7 @@ There are also reusable workflows for Go repositories, which hold whole jobs rat
 | Workflow | What it does |
 | --- | --- |
 | [`go-ci.yml`](.github/workflows/go-ci.yml) | gofmt, `go mod tidy -diff`, golangci-lint, `go test -race`, a build and `go vet` for every release platform with Go's cross compiler, a test with the `go` version from go.mod, and govulncheck |
-| [`go-release.yml`](.github/workflows/go-release.yml) | On a `v*` tag: tests, cross-compiles a binary per platform on one `ubuntu-latest` runner, and publishes them with `.sha256` files as a GitHub Release |
+| [`go-release.yml`](.github/workflows/go-release.yml) | On a `v*` tag: tests, cross-compiles one or more programs for each platform on one `ubuntu-latest` runner, and publishes them with `.sha256` files as one GitHub Release |
 
 Their inputs are documented at the top of each file. See [Go repositories](#go-repositories) for callers.
 
@@ -53,9 +53,10 @@ Full callers:
 ## Go repositories
 
 A Go repository calls the reusable workflows for CI and releases, and the composite actions
-above for Claude and Renovate, as any other repository does. Shared Go code, such as the
-`buildinfo` package that the release workflow links the version into, lives in
-[go-cerebrai](https://github.com/cerebrai-app/go-cerebrai).
+above for Claude and Renovate, as any other repository does. The Go programs live together in
+[go-cerebrai](https://github.com/cerebrai-app/go-cerebrai), one module with a `cmd/<name>`
+package per program and their shared code under `internal/`. They are released together, under
+one version. The examples below are its callers.
 
 `.github/workflows/ci.yml`:
 
@@ -70,10 +71,17 @@ on:
 permissions:
   contents: read
 
+# One run per PR (or per branch/tag for pushes). A new commit on a PR cancels
+# its previous run; runs on main and on tags are never cancelled.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   ci:
     uses: cerebrai-app/actions/.github/workflows/go-ci.yml@<commit sha> # v1
     with:
+      main-packages: ./cmd/brainctl ./cmd/workctl
       smoke-test-args: version # omit for a library
 ```
 
@@ -91,22 +99,29 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   release:
     uses: cerebrai-app/actions/.github/workflows/go-release.yml@<commit sha> # v1
     permissions:
       contents: write # the publish job creates the release
     with:
-      binary-name: brainctl
+      main-packages: ./cmd/brainctl ./cmd/workctl
 ```
 
-The program prints `<binary-name> <version>` for `<binary-name> version`: the release workflow
-runs the linux/amd64 binary with `version` before publishing anything and checks that output. It links the
-version from the tag into `github.com/cerebrai-app/go-cerebrai/buildinfo.version`, so the program
-gets it from `buildinfo.Version()`. A program with its own variable sets `version-variable`, for
-example to `main.version`.
+Each binary is named after its package, as `go build` names it (`./cmd/brainctl` builds
+`brainctl`). Each program prints `<name> <version>` for `<name> version`: the release workflow
+runs every linux/amd64 binary with `version` before publishing anything and checks that output.
+It links the version from the tag into
+`github.com/cerebrai-app/go-cerebrai/internal/buildinfo.version`, so the programs get it from
+`buildinfo.Version()`. A repository with its own variable sets `version-variable`, for example
+to `main.version`.
 
-The archives are named `<binary-name>-v<version>-<goos>-<goarch>.tar.gz` (`.zip` for Windows).
+Every program gets its own archive per platform, named `<name>-v<version>-<goos>-<goarch>.tar.gz`
+(`.zip` for Windows), all in the one release.
 Binaries are built with cgo off, so the Linux ones are static and run on any distribution.
 
 Everything runs on `ubuntu-latest`. Both workflows build linux/amd64, linux/arm64,
