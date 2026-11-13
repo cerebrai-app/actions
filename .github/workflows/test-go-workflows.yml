@@ -1,0 +1,32 @@
+name: Test Go workflows
+
+# Runs the reusable Go workflows from this commit against testdata/go-app, so a
+# change to them is exercised before callers pin it. The release workflow only
+# publishes on tags, and this workflow never runs on tags, so nothing is released.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    uses: ./.github/workflows/go-ci.yml
+    with:
+      working-directory: testdata/go-app
+      smoke-test-args: version
+
+  release:
+    uses: ./.github/workflows/go-release.yml
+    # The release workflow's publish job asks for contents: write, and a called
+    # workflow cannot get more than its caller grants, even for a skipped job.
+    permissions:
+      contents: write
+    with:
+      binary-name: go-app
+      working-directory: testdata/go-app
+      version-variable: main.version
+      extra-files: README.md
