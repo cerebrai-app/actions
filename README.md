@@ -18,7 +18,7 @@ There are also reusable workflows for Go repositories, which hold whole jobs rat
 | Workflow | What it does |
 | --- | --- |
 | [`go-ci.yml`](.github/workflows/go-ci.yml) | gofmt, `go mod tidy -diff`, golangci-lint, `go test -race`, a build and `go vet` for every release platform with Go's cross compiler, a test with the `go` version from go.mod, and govulncheck |
-| [`go-release.yml`](.github/workflows/go-release.yml) | On a `v*` tag: tests, cross-compiles one or more programs for each platform on one `ubuntu-latest` runner, and publishes them with `.sha256` files as one GitHub Release |
+| [`go-release.yml`](.github/workflows/go-release.yml) | On a `v*` tag: tests, builds every archive with GoReleaser on one `ubuntu-latest` runner, runs each Linux x86_64 binary, and publishes the archives and `checksums.txt` as one GitHub Release |
 
 Their inputs are documented at the top of each file. See [Go repositories](#go-repositories) for callers.
 
@@ -79,7 +79,7 @@ concurrency:
 
 jobs:
   ci:
-    uses: cerebrai-app/actions/.github/workflows/go-ci.yml@<commit sha> # v1
+    uses: cerebrai-app/actions/.github/workflows/go-ci.yml@<commit sha> # v2
     with:
       main-packages: ./cmd/brainctl ./cmd/workctl
       smoke-test-args: version # omit for a library
@@ -93,8 +93,8 @@ name: Release
 on:
   push:
     tags: ["v*"]
-  pull_request:
-    paths: [".github/workflows/release.yml"] # builds everything, publishes nothing
+  pull_request: # builds a snapshot of everything, publishes nothing
+    paths: [".github/workflows/release.yml", ".goreleaser.yaml"]
 
 permissions:
   contents: read
@@ -105,30 +105,32 @@ concurrency:
 
 jobs:
   release:
-    uses: cerebrai-app/actions/.github/workflows/go-release.yml@<commit sha> # v1
+    uses: cerebrai-app/actions/.github/workflows/go-release.yml@<commit sha> # v2
     permissions:
       contents: write # the publish job creates the release
-    with:
-      main-packages: ./cmd/brainctl ./cmd/workctl
 ```
 
-Each binary is named after its package, as `go build` names it (`./cmd/brainctl` builds
-`brainctl`). Each program prints `<name> <version>` for `<name> version`: the release workflow
-runs every linux/amd64 binary with `version` before publishing anything and checks that output.
-It links the version from the tag into
-`github.com/cerebrai-app/go-cerebrai/internal/buildinfo.version`, so the programs get it from
-`buildinfo.Version()`. A repository with its own variable sets `version-variable`, for example
-to `main.version`.
+Releases are built with [GoReleaser](https://goreleaser.com), pinned in `go-release.yml`. What to
+build lives in the caller's `.goreleaser.yaml`; see
+[go-cerebrai's](https://github.com/cerebrai-app/go-cerebrai/blob/main/.goreleaser.yaml) and
+[the test app's](testdata/go-app/.goreleaser.yaml). The workflow requires that config to:
 
-Every program gets its own archive per platform, named `<name>-v<version>-<goos>-<goarch>.tar.gz`
-(`.zip` for Windows), all in the one release.
-Binaries are built with cgo off, so the Linux ones are static and run on any distribution.
+- disable `release` and `changelog`. The workflow's publish job creates the release itself, so
+  GoReleaser runs without a token that can write.
+- set `snapshot.version_template`, the version pull request builds report (e.g. `0.0.0-dev`).
+- link `{{ .Version }}` (the tag without its `v`) into each binary, which prints
+  `<binary> <version>` for `<binary> version`. Before publishing anything, the workflow runs
+  every linux/amd64 binary with `version` and checks that output (`smoke-test-args` changes the
+  arguments; empty skips the check).
 
-Everything runs on `ubuntu-latest`. Both workflows build linux/amd64, linux/arm64,
+The release holds the archives and GoReleaser's `checksums.txt`. Check a download with
+`sha256sum --ignore-missing -c checksums.txt`.
+
+Everything runs on `ubuntu-latest`. `go-ci.yml` builds and vets linux/amd64, linux/arm64,
 darwin/amd64, darwin/arm64 and windows/amd64 with Go's cross compiler (`targets` changes the
-list). Only the Linux x86_64 binary and tests actually run; the other platforms are compiled and
-vetted, not executed. To also run the tests elsewhere, pass runners to `go-ci.yml`'s `os`, for
-example `'["ubuntu-latest", "windows-latest"]'`.
+list; keep it in step with `.goreleaser.yaml`). Only the Linux x86_64 binaries and tests actually
+run; the other platforms are compiled and vetted, not executed. To also run the tests elsewhere,
+pass runners to `go-ci.yml`'s `os`, for example `'["ubuntu-latest", "windows-latest"]'`.
 
 `renovate.json`, for the Go modules and the pinned actions and workflows:
 

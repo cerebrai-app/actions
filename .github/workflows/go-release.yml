@@ -1,45 +1,31 @@
 name: Go release
 
-# Reusable release for one or more Go programs that share a version. On a tag
-# like v1.2.3 it tests the tagged commit, cross-compiles every program for each
-# target on one ubuntu-latest runner, and publishes them all as one GitHub
-# Release. Called from a pull request it does
-# everything except publish, so a change to the caller is checked before a
+# Reusable release for Go programs built with GoReleaser. On a tag like v1.2.3
+# it tests the tagged commit, builds every archive with GoReleaser on one
+# ubuntu-latest runner, runs each linux/amd64 binary, and publishes the
+# archives and checksums.txt as one GitHub Release. Called from a pull request
+# it builds a snapshot and publishes nothing, so a change is checked before a
 # release. See the README for a full caller:
 #
 #   jobs:
 #     release:
-#       uses: cerebrai-app/actions/.github/workflows/go-release.yml@<commit sha> # v1
+#       uses: cerebrai-app/actions/.github/workflows/go-release.yml@<commit sha> # v2
 #       permissions:
 #         contents: write # the publish job creates the release
-#       with:
-#         main-packages: ./cmd/brainctl ./cmd/workctl
 #
-# The version comes from the tag (v1.2.3 -> 1.2.3) and is linked into the binary
-# with `-ldflags -X <version-variable>=<version>`. Outside a tag it is 0.0.0-dev.
+# What to build lives in the caller's .goreleaser.yaml (builds, archives,
+# checksum). Its `release` and `changelog` sections must be disabled: the
+# publish job creates the release itself, so GoReleaser never gets a token that
+# can write. The version is GoReleaser's {{ .Version }}, the tag without its
+# "v"; set snapshot.version_template for pull requests.
 
 on:
   workflow_call:
     inputs:
       working-directory:
-        description: Directory with the module's go.mod, relative to the repository root.
+        description: Directory with the module's go.mod and .goreleaser.yaml, relative to the repository root.
         type: string
         default: .
-      main-packages:
-        description: >-
-          Space-separated main packages to release, relative to
-          `working-directory`, e.g. `./cmd/brainctl ./cmd/workctl`. Each binary
-          is named after the last element of its import path, as `go build`
-          names it (`.` takes the module's name).
-        type: string
-        default: .
-      version-variable:
-        description: >-
-          Fully qualified string variable the version is linked into. The
-          default is go-cerebrai's internal/buildinfo package; a program with its own
-          variable passes e.g. `main.version`.
-        type: string
-        default: github.com/cerebrai-app/go-cerebrai/internal/buildinfo.version
       smoke-test-args:
         description: >-
           Arguments to run each linux/amd64 binary with before anything is
@@ -47,23 +33,14 @@ on:
           exactly `<binary name> <version>`. Empty skips it.
         type: string
         default: version
-      extra-files:
-        description: Space-separated files, relative to `working-directory`, to put next to the binary in every archive.
-        type: string
-        default: README.md LICENSE
-      targets:
-        description: >-
-          Space-separated `goos/goarch` pairs to build, from `go tool dist list`.
-          Every binary is cross-compiled with cgo off, so the Linux ones are
-          static.
-        type: string
-        default: linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64
 
 permissions:
   contents: read
 
 env:
   GOTOOLCHAIN: local
+  # renovate: datasource=github-releases depName=goreleaser/goreleaser
+  GORELEASER_VERSION: v2.20.2
 
 jobs:
   build:
@@ -78,7 +55,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0 # full history, to tell whether a tag is on the default branch
+          fetch-depth: 0 # GoReleaser and the default-branch check need the history and tags
           persist-credentials: false
 
       # Require the tagged commit to be on the default branch, so a tag pushed
@@ -89,25 +66,14 @@ jobs:
         env:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
+          if [[ ! "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::tag $GITHUB_REF_NAME is not v<major>.<minor>.<patch>[-<prerelease>]"
+            exit 1
+          fi
           if ! git merge-base --is-ancestor "$GITHUB_SHA" "origin/$DEFAULT_BRANCH"; then
             echo "::error::tag $GITHUB_REF_NAME points at $GITHUB_SHA, which is not on $DEFAULT_BRANCH"
             exit 1
           fi
-
-      - name: Determine version
-        id: version
-        run: |
-          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
-            if [[ ! "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
-              echo "::error::tag $GITHUB_REF_NAME is not v<major>.<minor>.<patch>[-<prerelease>]"
-              exit 1
-            fi
-            version=${GITHUB_REF_NAME#v}
-          else
-            version=0.0.0-dev
-          fi
-          echo "version $version"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
 
       # No cache: a poisoned cache entry would end up in a published binary.
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -118,91 +84,52 @@ jobs:
       # Gate: a tag on a commit whose tests fail must not build or publish anything.
       - run: go test ./...
 
-      - name: Build and package
+      - uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
+        with:
+          version: ${{ env.GORELEASER_VERSION }}
+          workdir: ${{ inputs.working-directory }}
+          args: >-
+            release --clean --skip=publish
+            ${{ github.ref_type != 'tag' && '--snapshot' || '' }}
+
+      # Run each binary that is about to be published, where the runner can:
+      # it must start and report its own version, which also proves the
+      # version made it into the binary.
+      - name: Smoke test
+        if: ${{ inputs.smoke-test-args != '' }}
         env:
-          VERSION: ${{ steps.version.outputs.version }}
-          TARGETS: ${{ inputs.targets }}
-          MAIN_PACKAGES: ${{ inputs.main-packages }}
-          VERSION_VARIABLE: ${{ inputs.version-variable }}
-          EXTRA_FILES: ${{ inputs.extra-files }}
           SMOKE_TEST_ARGS: ${{ inputs.smoke-test-args }}
-          CGO_ENABLED: '0'
         run: |
           set -euo pipefail
-          read -ra targets <<< "$TARGETS"
-          read -ra packages <<< "$MAIN_PACKAGES"
-          read -ra extra <<< "$EXTRA_FILES"
-          read -ra smoke_args <<< "$SMOKE_TEST_ARGS"
-
-          # Name each binary as `go build` would, and refuse anything that is
-          # not a main package (or two packages that would share a name).
-          declare -A bin_of=() seen=()
-          for pkg in "${packages[@]}"; do
-            info=$(go list -f '{{.Name}} {{.ImportPath}}' "$pkg")
-            if [[ "${info%% *}" != main ]]; then
-              echo "::error::$pkg is package ${info%% *}, not a main package"
-              exit 1
-            fi
-            bin=${info##*/}
-            if [[ -n "${seen[$bin]:-}" ]]; then
-              echo "::error::$pkg and ${seen[$bin]} would both build a binary named $bin"
-              exit 1
-            fi
-            seen[$bin]=$pkg
-            bin_of[$pkg]=$bin
-          done
-
-          rm -rf stage dist
-          mkdir -p stage dist
-          for target in "${targets[@]}"; do
-            goos=${target%/*}
-            goarch=${target#*/}
-            for pkg in "${packages[@]}"; do
-              bin=${bin_of[$pkg]}
-              name="$bin-v$VERSION-$goos-$goarch"
-              exe="$bin"
-              [[ "$goos" == windows ]] && exe="$bin.exe"
-              echo "::group::$bin $target"
-              mkdir -p "stage/$name"
-              GOOS=$goos GOARCH=$goarch go build -trimpath \
-                -ldflags "-s -w -X $VERSION_VARIABLE=$VERSION" \
-                -o "stage/$name/$exe" "$pkg"
-
-              # Run each binary that is about to be published, where the
-              # runner can: it must start and report its own version, which
-              # also proves the version made it into the binary.
-              if [[ "$target" == linux/amd64 ]] && (( ${#smoke_args[@]} )); then
-                out=$("./stage/$name/$exe" "${smoke_args[@]}")
-                echo "$out"
-                if [[ "$out" != "$bin $VERSION" ]]; then
-                  echo "::error::expected \"$bin $VERSION\" from $bin ${smoke_args[*]}, got \"$out\""
-                  exit 1
-                fi
-              fi
-
-              if (( ${#extra[@]} )); then
-                cp "${extra[@]}" "stage/$name/"
-              fi
-              if [[ "$goos" == windows ]]; then
-                file="$name.zip"
-                (cd stage && zip -qr "../dist/$file" "$name")
-              else
-                file="$name.tar.gz"
-                tar czf "dist/$file" -C stage "$name"
-              fi
-              (cd dist && sha256sum "$file" > "$file.sha256")
-              echo "::endgroup::"
-            done
-          done
-          if (( ${#smoke_args[@]} )) && [[ " ${targets[*]} " != *" linux/amd64 "* ]]; then
-            echo "::warning::no linux/amd64 target, so no binary was smoke-tested"
+          read -ra args <<< "$SMOKE_TEST_ARGS"
+          version=$(jq -r .version dist/metadata.json)
+          binaries=$(jq -r '.[] | select(.type == "Binary" and .goos == "linux" and .goarch == "amd64")
+            | "\(.extra.Binary)\t\(.path)"' dist/artifacts.json)
+          if [[ -z "$binaries" ]]; then
+            echo "::warning::no linux/amd64 binary, so nothing was smoke-tested"
+            exit 0
           fi
-          ls -l dist
+          while IFS=$'\t' read -r bin path; do
+            out=$("./$path" "${args[@]}")
+            echo "$out"
+            if [[ "$out" != "$bin $version" ]]; then
+              echo "::error::expected \"$bin $version\" from $bin ${args[*]}, got \"$out\""
+              exit 1
+            fi
+          done <<< "$binaries"
+
+      - name: Collect release files
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/release"
+          jq -r '.[] | select(.type == "Archive" or .type == "Checksum") | .path' dist/artifacts.json \
+            | xargs -I{} cp {} "$RUNNER_TEMP/release/"
+          ls -l "$RUNNER_TEMP/release"
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: dist
-          path: ${{ inputs.working-directory }}/dist/*
+          name: release
+          path: ${{ runner.temp }}/release/*
           if-no-files-found: error
 
   publish:
@@ -218,13 +145,13 @@ jobs:
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: dist
-          path: dist
+          name: release
+          path: release
 
       - name: Create release
         run: |
-          ls -l dist
+          ls -l release
           prerelease=()
           [[ "$GITHUB_REF_NAME" == *-* ]] && prerelease=(--prerelease)
-          gh release create "$GITHUB_REF_NAME" dist/* \
+          gh release create "$GITHUB_REF_NAME" release/* \
             --title "$GITHUB_REF_NAME" --generate-notes --verify-tag "${prerelease[@]}"

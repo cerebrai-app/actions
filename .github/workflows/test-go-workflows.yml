@@ -28,6 +28,3 @@ jobs:
       contents: write
     with:
       working-directory: testdata/go-app
-      main-packages: . ./cmd/go-tool
-      version-variable: main.version
-      extra-files: README.md
