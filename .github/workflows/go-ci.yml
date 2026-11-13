@@ -11,7 +11,10 @@ name: Go CI
 #
 # Jobs:
 #   lint        gofmt, `go mod tidy -diff` and golangci-lint, on the latest stable Go
-#   test        build and test on every runner in `os`, on the latest stable Go
+#   test        build and test on every runner in `os` (ubuntu-latest by default),
+#               on the latest stable Go
+#   cross-build build and vet every platform in `targets` with Go's cross
+#               compiler on ubuntu-latest, so code behind build tags compiles
 #   min-go      build and test with exactly the `go` version from go.mod, so the
 #               declared minimum is a tested one
 #   govulncheck known vulnerabilities in the code paths the module actually calls
@@ -29,11 +32,18 @@ on:
         default: .
       os:
         description: >-
-          JSON list of runners for the test job. `ubuntu-24.04-arm` is a native
-          arm64 Linux runner (free for public repositories); a private
-          repository without access to it can pass a list without it.
+          JSON list of runners for the test job. Other platforms are covered by
+          cross-compiling in the cross-build job; add a runner here only to run
+          the tests on it, e.g. `["ubuntu-latest", "windows-latest"]`.
         type: string
-        default: '["ubuntu-latest", "ubuntu-24.04-arm", "macos-latest", "windows-latest"]'
+        default: '["ubuntu-latest"]'
+      targets:
+        description: >-
+          Space-separated `goos/goarch` pairs that the cross-build job builds
+          and vets (tests included), with cgo off. Match go-release.yml's
+          `targets`.
+        type: string
+        default: linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64
       main-package:
         description: Package of the program's main, relative to `working-directory`. Used by the smoke test.
         type: string
@@ -139,6 +149,41 @@ jobs:
         run: |
           read -ra args <<< "$SMOKE_TEST_ARGS"
           go run "$MAIN_PACKAGE" "${args[@]}"
+
+  cross-build:
+    name: Cross-build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: stable
+          cache-dependency-path: |
+            ${{ inputs.working-directory }}/go.mod
+            ${{ inputs.working-directory }}/go.sum
+
+      # `go vet` type-checks the tests too, so a test file behind a build tag
+      # for another platform cannot rot unnoticed.
+      - name: Build and vet each target
+        env:
+          TARGETS: ${{ inputs.targets }}
+          CGO_ENABLED: '0'
+        run: |
+          set -euo pipefail
+          read -ra targets <<< "$TARGETS"
+          for target in "${targets[@]}"; do
+            echo "::group::$target"
+            GOOS=${target%/*} GOARCH=${target#*/} go build ./...
+            GOOS=${target%/*} GOARCH=${target#*/} go vet ./...
+            echo "::endgroup::"
+          done
 
   min-go:
     name: Test (go version in go.mod)

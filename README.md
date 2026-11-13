@@ -17,8 +17,8 @@ There are also reusable workflows for Go repositories, which hold whole jobs rat
 
 | Workflow | What it does |
 | --- | --- |
-| [`go-ci.yml`](.github/workflows/go-ci.yml) | gofmt, `go mod tidy -diff`, golangci-lint, `go test -race` on Linux (x86_64 and arm64), macOS and Windows, a test with the `go` version from go.mod, and govulncheck |
-| [`go-release.yml`](.github/workflows/go-release.yml) | On a `v*` tag: tests, cross-compiles a binary per platform, runs each one on its own platform, and publishes them with `.sha256` files as a GitHub Release |
+| [`go-ci.yml`](.github/workflows/go-ci.yml) | gofmt, `go mod tidy -diff`, golangci-lint, `go test -race`, a build and `go vet` for every release platform with Go's cross compiler, a test with the `go` version from go.mod, and govulncheck |
+| [`go-release.yml`](.github/workflows/go-release.yml) | On a `v*` tag: tests, cross-compiles a binary per platform on one `ubuntu-latest` runner, and publishes them with `.sha256` files as a GitHub Release |
 
 Their inputs are documented at the top of each file. See [Go repositories](#go-repositories) for callers.
 
@@ -101,7 +101,7 @@ jobs:
 ```
 
 The program prints `<binary-name> <version>` for `<binary-name> version`: the release workflow
-runs every binary with `version` before publishing it and checks that output. It links the
+runs the linux/amd64 binary with `version` before publishing anything and checks that output. It links the
 version from the tag into `github.com/cerebrai-app/go-cerebrai/buildinfo.version`, so the program
 gets it from `buildinfo.Version()`. A program with its own variable sets `version-variable`, for
 example to `main.version`.
@@ -109,9 +109,11 @@ example to `main.version`.
 The archives are named `<binary-name>-v<version>-<goos>-<goarch>.tar.gz` (`.zip` for Windows).
 Binaries are built with cgo off, so the Linux ones are static and run on any distribution.
 
-The default runners include `ubuntu-24.04-arm`, a native arm64 Linux runner that is free for
-public repositories. A private repository without arm64 runners passes `os` (CI) and `targets`
-(release) without it.
+Everything runs on `ubuntu-latest`. Both workflows build linux/amd64, linux/arm64,
+darwin/amd64, darwin/arm64 and windows/amd64 with Go's cross compiler (`targets` changes the
+list). Only the Linux x86_64 binary and tests actually run; the other platforms are compiled and
+vetted, not executed. To also run the tests elsewhere, pass runners to `go-ci.yml`'s `os`, for
+example `'["ubuntu-latest", "windows-latest"]'`.
 
 `renovate.json`, for the Go modules and the pinned actions and workflows:
 
