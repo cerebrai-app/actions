@@ -29,13 +29,37 @@ archives:
     format_overrides:
       - { goos: windows, formats: [zip] }
     wrap_in_directory: true
-    files: [README.md]
+    # Fixed timestamps, so a rebuild of the same commit gives byte-identical
+    # archives, which go-release.yml's publish job relies on.
+    builds_info:
+      mtime: "{{ .CommitDate }}"
+    files:
+      - src: README.md
+        info: { mtime: "{{ .CommitDate }}" }
   - <<: *archive
     id: go-tool
     ids: [go-tool]
 
 checksum:
   name_template: checksums.txt
+
+# Generated on every pull request, never uploaded (the self-test never runs on
+# a tag), so the release workflow's snapshot checks that they still render.
+homebrew_casks:
+  - name: go-app
+    ids: [go-app]
+    binaries: [go-app]
+    url:
+      template: "https://example.com/{{ .Tag }}/{{ .ArtifactName }}"
+    repository: { owner: example, name: homebrew-tap }
+    skip_upload: "true"
+
+scoops:
+  - name: go-app
+    ids: [go-app]
+    url_template: "https://example.com/{{ .Tag }}/{{ .ArtifactName }}"
+    repository: { owner: example, name: scoop-bucket }
+    skip_upload: "true"
 
 snapshot:
   version_template: 0.0.0-dev
