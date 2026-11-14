@@ -9,6 +9,8 @@ Composite GitHub Actions shared by the cerebrai-app repositories.
 | [`ponytail-review`](ponytail-review/action.yml) | Reviews a PR with the third-party ponytail plugin and posts one report comment |
 | [`minimize-ponytail-reviews`](minimize-ponytail-reviews/action.yml) | Collapses all but the newest ponytail report as outdated |
 | [`renovate`](renovate/action.yml) | Runs self-hosted Renovate as a GitHub App |
+| [`release-notes`](release-notes/action.yml) | Writes the release notes for a `vX.Y.Z` tag with Claude Code, from the commits and PRs since the previous version, and uploads them as an artifact |
+| [`publish-release-notes`](publish-release-notes/action.yml) | Puts those notes on the tag's GitHub Release, creating it if needed. Runs in its own job with `contents: write` |
 | [`setup-rust`](setup-rust/action.yml) | Installs a Rust toolchain (or the MSRV), the cargo cache and an optional arm64 Linux cross toolchain under QEMU. Exports `RUSTUP_TOOLCHAIN`, so the requested toolchain wins over a `rust-toolchain.toml` |
 
 Each `action.yml` documents its inputs.
@@ -30,7 +32,8 @@ repository's workflow:
 - **Triggers** (`on:`) and job-level conditions, such as the `@claude` mention check.
 - **`permissions:`**, which are set per job. Each action's description lists what its job needs.
   Keep `ponytail-review` and `minimize-ponytail-reviews` in separate jobs: the job that runs the
-  third-party plugin should not get write access.
+  third-party plugin should not get write access. The same goes for `release-notes` and
+  `publish-release-notes`: Claude writes the notes in a job that can only read.
 - **Secrets.** Actions can't read `secrets`, so pass them as inputs.
 
 ## Usage
@@ -194,12 +197,14 @@ Tag a commit on `main` with `v<major>.<minor>.<patch>`, then move the `v<major>`
 breaking change to an input bumps the major version.
 
 Pushing the `v<major>.<minor>.<patch>` tag runs
-[`release-notes.yml`](.github/workflows/release-notes.yml): Claude Code reads the commits and pull
-requests since the previous version and writes the release notes, breaking changes first, and a
-second job creates the GitHub Release with them. Creating the release from the web UI instead
-works too; the workflow fills in its notes. To rewrite the notes of an existing tag, run the
-workflow by hand from the Actions tab with that tag. It needs the `CLAUDE_CODE_OAUTH_TOKEN` secret,
-like the other Claude workflows.
+[`release-notes.yml`](.github/workflows/release-notes.yml), which uses this repository's own
+`release-notes` and `publish-release-notes` actions: Claude Code reads the commits and pull requests
+since the previous version and writes the notes, breaking changes first, and a second job creates
+the GitHub Release with them. Creating the release from the web UI instead works too; the workflow
+fills in its notes. To rewrite the notes of an existing tag, run the workflow by hand from the
+Actions tab with that tag. It needs the `CLAUDE_CODE_OAUTH_TOKEN` secret, like the other Claude
+workflows. [cerebrai-app/_template](https://github.com/cerebrai-app/_template) has the same workflow
+for new repositories, with the actions pinned by commit.
 
 ## Renovate
 
