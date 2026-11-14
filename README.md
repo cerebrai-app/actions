@@ -193,6 +193,14 @@ release, and keep it within the [releases Go supports](https://go.dev/doc/devel/
 Tag a commit on `main` with `v<major>.<minor>.<patch>`, then move the `v<major>` tag to it. A
 breaking change to an input bumps the major version.
 
+Pushing the `v<major>.<minor>.<patch>` tag runs
+[`release-notes.yml`](.github/workflows/release-notes.yml): Claude Code reads the commits and pull
+requests since the previous version and writes the release notes, breaking changes first, and a
+second job creates the GitHub Release with them. Creating the release from the web UI instead
+works too; the workflow fills in its notes. To rewrite the notes of an existing tag, run the
+workflow by hand from the Actions tab with that tag. It needs the `CLAUDE_CODE_OAUTH_TOKEN` secret,
+like the other Claude workflows.
+
 ## Renovate
 
 The actions here pin their own dependencies: other actions, the ponytail plugin marketplace and
