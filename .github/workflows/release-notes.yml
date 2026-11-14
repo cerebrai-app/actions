@@ -1,0 +1,84 @@
+name: Release notes
+
+# Writes the GitHub Release notes for a version tag (vX.Y.Z) with this
+# repository's own release-notes and publish-release-notes actions.
+#
+# Runs when a version tag is pushed, or a release is published from the web UI,
+# and can be started by hand for any existing tag to rewrite its notes. Pushes
+# of other tags (e.g. the floating v3) do not start it; a release published for
+# such a tag, or a manual run with one, fails at the release-notes action's tag
+# check without writing anything. The release is created if it does not exist.
+#
+# Claude writes the notes in a job whose GITHUB_TOKEN can only read, and may
+# only use git/gh read commands and write the notes file. A separate job with
+# contents: write puts them on the release.
+
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Version tag to write the notes for, e.g. v3.1.0"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+# A tag push and a release published from the web UI can both fire for the same
+# tag; they queue, and the second finds the notes already written.
+concurrency:
+  group: release-notes-${{ inputs.tag || github.event.release.tag_name || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  TAG: ${{ inputs.tag || github.event.release.tag_name || github.ref_name }}
+
+jobs:
+  write:
+    name: Write notes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      id-token: write # Claude Code authenticates through the Claude GitHub App
+    outputs:
+      skip: ${{ steps.notes.outputs.skip }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # full history and tags, to find the previous version
+          persist-credentials: false
+
+      - id: notes
+        uses: ./release-notes
+        with:
+          claude-code-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          tag: ${{ env.TAG }}
+          rewrite: ${{ github.event_name == 'workflow_dispatch' }}
+          about: >-
+            Composite GitHub Actions (each `<name>/action.yml`) and reusable workflows
+            (`.github/workflows/go-ci.yml`, `.github/workflows/go-release.yml`) that other
+            cerebrai-app repositories pin by commit, with the tag as a comment. Readers maintain
+            those repositories and decide whether to bump their pin and what they must change
+            when they do.
+
+  publish:
+    name: Publish notes
+    needs: write
+    if: ${{ needs.write.outputs.skip != 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the release, or edit its notes
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: publish-release-notes
+
+      - uses: ./publish-release-notes
+        with:
+          tag: ${{ env.TAG }}

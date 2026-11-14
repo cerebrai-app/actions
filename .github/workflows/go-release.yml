@@ -12,9 +12,10 @@ name: Go release
 #      token that can write to those repositories only, after checking that
 #      GoReleaser's rebuild matches the released archives.
 #
-# Re-running a failed publish job is safe: an existing release is kept. The
-# tap-app job checks the app on every run, pull requests included, so a
-# missing installation or wrong secrets show up before a tag.
+# Re-running a failed publish job is safe: an existing release (from an earlier
+# attempt, the web UI or a release notes workflow) gets the files uploaded and
+# keeps its notes. The tap-app job checks the app on every run, pull requests
+# included, so a missing installation or wrong secrets show up before a tag.
 #
 # Called from a pull request it builds a snapshot and publishes nothing, so a
 # change is checked before a release. See the README for a full caller.
@@ -237,13 +238,16 @@ jobs:
         with:
           subject-checksums: ${{ runner.temp }}/release/checksums.txt
 
-      # Skipped when the release exists, so this job can be re-run after a
-      # failure in step 3 (e.g. once the tap app secrets are fixed).
+      # If the release already exists (created from the web UI, by a release
+      # notes workflow that ran first, or by an earlier attempt of this job),
+      # upload the files to it and keep its title and notes. So this job can
+      # also be re-run after a failure in step 3.
       - name: Create release
         run: |
           ls -l "$RUNNER_TEMP/release"
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            echo "::notice::release $GITHUB_REF_NAME already exists; not creating it again"
+            echo "::notice::release $GITHUB_REF_NAME already exists; uploading the files to it"
+            gh release upload "$GITHUB_REF_NAME" "$RUNNER_TEMP"/release/* --clobber
             exit 0
           fi
           prerelease=()
