@@ -18,7 +18,7 @@ There are also reusable workflows for Go repositories, which hold whole jobs rat
 | Workflow | What it does |
 | --- | --- |
 | [`go-ci.yml`](.github/workflows/go-ci.yml) | gofmt, `go mod tidy -diff`, golangci-lint, `go test -race`, a build and `go vet` for every release platform with Go's cross compiler, a test with the `go` version from go.mod, and govulncheck |
-| [`go-release.yml`](.github/workflows/go-release.yml) | On a `v*` tag: tests, builds every archive with GoReleaser on one `ubuntu-latest` runner, runs each Linux x86_64 binary, and publishes the archives and `checksums.txt` as one GitHub Release |
+| [`go-release.yml`](.github/workflows/go-release.yml) | On a `v*` tag: tests, builds every archive with GoReleaser on one `ubuntu-latest` runner, runs each Linux x86_64 binary, publishes the archives and `checksums.txt` as one GitHub Release with build attestations, and optionally updates Homebrew casks and Scoop manifests |
 
 Their inputs are documented at the top of each file. See [Go repositories](#go-repositories) for callers.
 
@@ -79,7 +79,7 @@ concurrency:
 
 jobs:
   ci:
-    uses: cerebrai-app/actions/.github/workflows/go-ci.yml@<commit sha> # v2
+    uses: cerebrai-app/actions/.github/workflows/go-ci.yml@<commit sha> # v3
     with:
       main-packages: ./cmd/brainctl ./cmd/workctl
       smoke-test-args: version # omit for a library
@@ -105,9 +105,16 @@ concurrency:
 
 jobs:
   release:
-    uses: cerebrai-app/actions/.github/workflows/go-release.yml@<commit sha> # v2
+    uses: cerebrai-app/actions/.github/workflows/go-release.yml@<commit sha> # v3
     permissions:
-      contents: write # the publish job creates the release
+      contents: write # create the release
+      id-token: write # sign the build attestations
+      attestations: write # store them
+    with:
+      tap-repositories: homebrew-tap,scoop-bucket # optional, see below
+    secrets:
+      tap-app-client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+      tap-app-private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
 ```
 
 Releases are built with [GoReleaser](https://goreleaser.com), pinned in `go-release.yml`. What to
@@ -116,15 +123,38 @@ build lives in the caller's `.goreleaser.yaml`; see
 [the test app's](testdata/go-app/.goreleaser.yaml). The workflow requires that config to:
 
 - disable `release` and `changelog`. The workflow's publish job creates the release itself, so
-  GoReleaser runs without a token that can write.
+  GoReleaser never gets a token that can write to the calling repository.
 - set `snapshot.version_template`, the version pull request builds report (e.g. `0.0.0-dev`).
 - link `{{ .Version }}` (the tag without its `v`) into each binary, which prints
   `<binary> <version>` for `<binary> version`. Before publishing anything, the workflow runs
   every linux/amd64 binary with `version` and checks that output (`smoke-test-args` changes the
   arguments; empty skips the check).
+- build reproducibly: `mod_timestamp`, `-trimpath`, and archive `builds_info` and `files`
+  timestamps set to `{{ .CommitDate }}`. Publishing the Homebrew casks and Scoop manifests
+  rebuilds the archives, and the workflow checks that the rebuild matches the release.
 
-The release holds the archives and GoReleaser's `checksums.txt`. Check a download with
-`sha256sum --ignore-missing -c checksums.txt`.
+A release holds the archives and GoReleaser's `checksums.txt`, and every archive gets a
+[build provenance attestation](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations).
+Check a download with `sha256sum --ignore-missing -c checksums.txt`, and where it was built with
+`gh attestation verify <archive> --owner cerebrai-app`.
+
+### Homebrew and Scoop
+
+With `homebrew_casks` and `scoops` in `.goreleaser.yaml`, the publish job runs GoReleaser a second
+time to push them to a tap and a bucket repository. It does that with a GitHub App token that can
+write to those repositories only. Set up once per organization:
+
+1. Create the repositories, e.g. `homebrew-tap` (Homebrew requires the `homebrew-` prefix) and
+   `scoop-bucket`. Each needs a default branch, so start them with a README.
+2. Create a GitHub App with **Contents: read and write** and no other permissions, and install
+   it on those two repositories only.
+3. Add its Client ID and private key (the whole `.pem` file) as the secrets the caller passes as
+   `tap-app-client-id` and `tap-app-private-key`, e.g. `RELEASE_APP_CLIENT_ID` and
+   `RELEASE_APP_PRIVATE_KEY`, at the organization or repository level.
+
+Without the secrets or `tap-repositories`, the release is published as usual and the job notes
+that the casks and manifests were skipped. Prerelease tags never update them
+(`skip_upload: auto`).
 
 Everything runs on `ubuntu-latest`. `go-ci.yml` builds and vets linux/amd64, linux/arm64,
 darwin/amd64, darwin/arm64 and windows/amd64 with Go's cross compiler (`targets` changes the

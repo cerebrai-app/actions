@@ -22,9 +22,11 @@ jobs:
 
   release:
     uses: ./.github/workflows/go-release.yml
-    # The release workflow's publish job asks for contents: write, and a called
-    # workflow cannot get more than its caller grants, even for a skipped job.
+    # The release workflow's publish job asks for these, and a called workflow
+    # cannot get more than its caller grants, even for a skipped job.
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     with:
       working-directory: testdata/go-app
