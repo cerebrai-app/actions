@@ -152,6 +152,13 @@ write to those repositories only. Set up once per organization:
    `tap-app-client-id` and `tap-app-private-key`, e.g. `RELEASE_APP_CLIENT_ID` and
    `RELEASE_APP_PRIVATE_KEY`, at the organization or repository level.
 
+The `Check tap app` job creates the same token on every run of the workflow, pull requests
+included, and reads each tap repository with it. A missing installation, a missing Contents
+permission or secrets from the wrong app fail it there, and on a tag they stop the release
+before anything is published. Runs without the secrets (pull requests from forks, Dependabot)
+skip the check with a notice. For it to run on every pull request, drop the `paths` filter from
+the caller's `pull_request` trigger.
+
 Without the secrets or `tap-repositories`, the release is published as usual and the job notes
 that the casks and manifests were skipped. Prerelease tags never update them
 (`skip_upload: auto`).

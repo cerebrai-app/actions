@@ -12,7 +12,9 @@ name: Go release
 #      token that can write to those repositories only, after checking that
 #      GoReleaser's rebuild matches the released archives.
 #
-# Re-running a failed publish job is safe: an existing release is kept.
+# Re-running a failed publish job is safe: an existing release is kept. The
+# tap-app job checks the app on every run, pull requests included, so a
+# missing installation or wrong secrets show up before a tag.
 #
 # Called from a pull request it builds a snapshot and publishes nothing, so a
 # change is checked before a release. See the README for a full caller.
@@ -161,10 +163,57 @@ jobs:
           path: ${{ runner.temp }}/release/*
           if-no-files-found: error
 
+  # Checks, on every run, that the tap app can do what step 3 of the publish
+  # job needs: create a token for tap-repositories with Contents write, and
+  # read each of them. A missing installation or wrong secrets then fail a pull
+  # request, and on a tag they fail before anything is published.
+  tap-app:
+    name: Check tap app
+    if: ${{ inputs.tap-repositories != '' }}
+    runs-on: ubuntu-latest
+    permissions: {}
+    env:
+      TAP_APP_CLIENT_ID: ${{ secrets.tap-app-client-id }}
+    steps:
+      # Pull requests from forks, and Dependabot's, get no secrets.
+      - name: Skip without app secrets
+        if: ${{ env.TAP_APP_CLIENT_ID == '' }}
+        run: echo "::notice::No tap-app-client-id secret in this run, so the tap app was not checked."
+
+      - name: Create tap token
+        id: tap-token
+        if: ${{ env.TAP_APP_CLIENT_ID != '' }}
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ env.TAP_APP_CLIENT_ID }}
+          private-key: ${{ secrets.tap-app-private-key }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ inputs.tap-repositories }}
+          permission-contents: write
+
+      - name: Read each tap repository with the token
+        if: ${{ steps.tap-token.outputs.token != '' }}
+        env:
+          GH_TOKEN: ${{ steps.tap-token.outputs.token }}
+          OWNER: ${{ github.repository_owner }}
+          TAP_REPOSITORIES: ${{ inputs.tap-repositories }}
+        run: |
+          set -euo pipefail
+          IFS=, read -ra repos <<< "$TAP_REPOSITORIES"
+          for repo in "${repos[@]}"; do
+            repo=$(echo "$repo" | xargs) # trim spaces
+            branch=$(gh api "repos/$OWNER/$repo" --jq .default_branch)
+            echo "ok $OWNER/$repo (default branch $branch)"
+          done
+
   publish:
     name: Publish release
-    needs: build
-    if: ${{ github.ref_type == 'tag' }}
+    needs: [build, tap-app]
+    # tap-app is skipped without tap-repositories; publish still runs then.
+    if: >-
+      ${{ github.ref_type == 'tag' && !cancelled()
+      && needs.build.result == 'success'
+      && contains(fromJSON('["success", "skipped"]'), needs.tap-app.result) }}
     runs-on: ubuntu-latest
     permissions:
       contents: write # create the release
