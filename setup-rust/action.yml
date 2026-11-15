@@ -48,6 +48,12 @@ outputs:
 runs:
   using: composite
   steps:
+    # Self-hosted runners don't come with jq, which reads the MSRV below.
+    - name: Install jq
+      if: ${{ inputs.toolchain == 'msrv' }}
+      shell: bash
+      run: '"$GITHUB_ACTION_PATH/../setup-jq/install.sh"'
+
     - name: Resolve toolchain
       id: resolve
       shell: bash

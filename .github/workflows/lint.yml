@@ -13,6 +13,10 @@ env:
   ACTIONLINT_VERSION: v1.7.12
   # renovate: datasource=pypi depName=check-jsonschema
   CHECK_JSONSCHEMA_VERSION: 0.39.0
+  # renovate: datasource=pypi depName=shellcheck-py
+  SHELLCHECK_PY_VERSION: 0.11.0.1
+  # renovate: datasource=pypi depName=PyYAML
+  PYYAML_VERSION: 6.0.3
 
 jobs:
   lint:
@@ -28,8 +32,23 @@ jobs:
         with:
           go-version: stable
 
-      # Workflows, including the `run:` scripts (shellcheck is preinstalled on
-      # the runner) and the inputs passed to local actions such as ./renovate.
+      # Self-hosted runners don't come with Python, pipx or shellcheck. Install
+      # Python, then the pinned tools: check-jsonschema, shellcheck (from
+      # shellcheck-py, which actionlint also runs on the `run:` scripts) and
+      # PyYAML for shellcheck-actions.py.
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.13'
+
+      - name: Install the Python lint tools
+        run: |
+          python -m pip install --disable-pip-version-check \
+            "check-jsonschema==$CHECK_JSONSCHEMA_VERSION" \
+            "shellcheck-py==$SHELLCHECK_PY_VERSION" \
+            "PyYAML==$PYYAML_VERSION"
+
+      # Workflows, including the `run:` scripts (with the shellcheck installed
+      # above) and the inputs passed to local actions such as ./renovate.
       - name: actionlint
         run: |
           go install "github.com/rhysd/actionlint/cmd/actionlint@$ACTIONLINT_VERSION"
@@ -39,8 +58,8 @@ jobs:
       # against the published schema for action metadata.
       - name: Validate action.yml schema
         run: |
-          pipx run "check-jsonschema==$CHECK_JSONSCHEMA_VERSION" \
+          check-jsonschema \
             --builtin-schema vendor.github-actions ./*/action.yml
 
       - name: shellcheck composite action scripts
-        run: python3 .github/scripts/shellcheck-actions.py
+        run: python .github/scripts/shellcheck-actions.py
