@@ -12,6 +12,11 @@ inputs:
 runs:
   using: composite
   steps:
+    # Self-hosted runners don't come with gh, which this action needs.
+    - name: Install gh
+      shell: bash
+      run: '"$GITHUB_ACTION_PATH/../setup-gh/install.sh"'
+
     - name: Checkout repository
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:

@@ -1,4 +1,5 @@
-"""Run shellcheck on the bash `run:` steps of every composite action.
+"""Run shellcheck on the bash `run:` steps of every composite action, and on
+the shell scripts in the action directories.
 
 actionlint checks the `run:` scripts in workflows but not in action.yml files,
 so this covers the composite actions. Each `${{ ... }}` expression is replaced
@@ -36,5 +37,14 @@ for path in sorted(glob.glob("*/action.yml")):
                 print(f"{path} ({name}): {line.split(':', 1)[1]}")
         else:
             print(f"ok {path} ({name})")
+
+# Scripts that composite actions run from their own directory, such as setup-gh/install.sh.
+for path in sorted(glob.glob("*/*.sh")):
+    result = subprocess.run(["shellcheck", "--format=gcc", path], capture_output=True, text=True)
+    if result.returncode != 0:
+        failed = True
+        print(result.stdout, end="")
+    else:
+        print(f"ok {path}")
 
 sys.exit(1 if failed else 0)

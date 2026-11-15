@@ -23,6 +23,11 @@ jobs:
         with:
           persist-credentials: false
 
+      # Self-hosted runners don't come with Go, which installs actionlint below.
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: stable
+
       # Workflows, including the `run:` scripts (shellcheck is preinstalled on
       # the runner) and the inputs passed to local actions such as ./renovate.
       - name: actionlint

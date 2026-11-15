@@ -11,6 +11,7 @@ Composite GitHub Actions shared by the cerebrai-app repositories.
 | [`renovate`](renovate/action.yml) | Runs self-hosted Renovate as a GitHub App |
 | [`release-notes`](release-notes/action.yml) | Writes the release notes for a `vX.Y.Z` tag with Claude Code, from the commits and PRs since the previous version, and uploads them as an artifact |
 | [`publish-release-notes`](publish-release-notes/action.yml) | Puts those notes on the tag's GitHub Release, creating it if needed. Runs in its own job with `contents: write` |
+| [`setup-gh`](setup-gh/action.yml) | Installs the GitHub CLI (`gh`), checked against the release's checksums and kept in the runner's tool cache, for self-hosted runners that don't come with it. The actions here that call `gh` already install it |
 | [`setup-rust`](setup-rust/action.yml) | Installs a Rust toolchain (or the MSRV), the cargo cache and an optional arm64 Linux cross toolchain under QEMU. Exports `RUSTUP_TOOLCHAIN`, so the requested toolchain wins over a `rust-toolchain.toml` |
 
 Each `action.yml` documents its inputs.
