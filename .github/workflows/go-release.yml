@@ -124,6 +124,10 @@ jobs:
             release --clean --skip=publish
             ${{ github.ref_type != 'tag' && '--snapshot' || '' }}
 
+      # Self-hosted runners don't come with jq, which reads GoReleaser's
+      # metadata in the next two steps.
+      - uses: cerebrai-app/actions/setup-jq@3a0880d7cd87db91697fd315f48a5f33307931a8 # unreleased, from cerebrai-app/actions#10
+
       # Run each binary that is about to be published, where the runner can:
       # it must start and report its own version, which also proves the
       # version made it into the binary.
