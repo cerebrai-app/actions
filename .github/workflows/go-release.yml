@@ -2,7 +2,7 @@ name: Go release
 
 # Reusable release for Go programs built with GoReleaser. On a tag like v1.2.3
 # it tests the tagged commit, builds every archive with GoReleaser on one
-# ubuntu-latest runner, runs each linux/amd64 binary, and then publishes:
+# self-hosted runner, runs each linux/amd64 binary, and then publishes:
 #
 #   1. a build provenance attestation for every archive (verify one with
 #      `gh attestation verify <file> --owner <owner>`);
@@ -70,7 +70,7 @@ env:
 jobs:
   build:
     name: Test and build
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     permissions:
       contents: read
     outputs:
@@ -124,6 +124,10 @@ jobs:
             release --clean --skip=publish
             ${{ github.ref_type != 'tag' && '--snapshot' || '' }}
 
+      # Self-hosted runners don't come with jq, which reads GoReleaser's
+      # metadata in the next two steps.
+      - uses: cerebrai-app/actions/setup-jq@3a0880d7cd87db91697fd315f48a5f33307931a8 # unreleased, from cerebrai-app/actions#10
+
       # Run each binary that is about to be published, where the runner can:
       # it must start and report its own version, which also proves the
       # version made it into the binary.
@@ -171,7 +175,7 @@ jobs:
   tap-app:
     name: Check tap app
     if: ${{ inputs.tap-repositories != '' }}
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     permissions: {}
     env:
       TAP_APP_CLIENT_ID: ${{ secrets.tap-app-client-id }}
@@ -191,6 +195,11 @@ jobs:
           owner: ${{ github.repository_owner }}
           repositories: ${{ inputs.tap-repositories }}
           permission-contents: write
+
+      # Self-hosted runners don't come with gh. A reusable workflow can't use
+      # this repository's actions by local path, so it is pinned like any other.
+      - uses: cerebrai-app/actions/setup-gh@9f49845b5d545dd90f1d893ec0dac0461ceb18c7 # unreleased, from cerebrai-app/actions#10
+        if: ${{ steps.tap-token.outputs.token != '' }}
 
       - name: Read each tap repository with the token
         if: ${{ steps.tap-token.outputs.token != '' }}
@@ -215,7 +224,7 @@ jobs:
       ${{ github.ref_type == 'tag' && !cancelled()
       && needs.build.result == 'success'
       && contains(fromJSON('["success", "skipped"]'), needs.tap-app.result) }}
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     permissions:
       contents: write # create the release
       id-token: write # sign the attestations
@@ -229,6 +238,9 @@ jobs:
       run:
         shell: bash
     steps:
+      # Self-hosted runners don't come with gh, which creates the release.
+      - uses: cerebrai-app/actions/setup-gh@9f49845b5d545dd90f1d893ec0dac0461ceb18c7 # unreleased, from cerebrai-app/actions#10
+
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release

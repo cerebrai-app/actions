@@ -1,18 +1,26 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": ["config:recommended", "helpers:pinGitHubActionDigests"],
-  "description": "Keeps the GitHub Actions pinned in the composite actions and workflows, the pinned ponytail plugin marketplace and the pinned Renovate image and lint tools up to date. Only those are managed here.",
+  "description": "Keeps the GitHub Actions pinned in the composite actions and workflows, the pinned ponytail plugin marketplace and the pinned Renovate image, lint tools, gh and jq up to date. Only those are managed here.",
   "enabledManagers": ["github-actions", "custom.regex"],
   "customManagers": [
     {
-      "description": "Pinned versions annotated with a `# renovate:` comment: marketplace checkouts (`ref: <sha> # <tag>`), the Renovate image (`renovate-version: <version>@<digest>`) and lint tool versions (`<NAME>_VERSION: <version>`)",
+      "description": "Pinned versions annotated with a `# renovate:` comment: marketplace checkouts (`ref: <sha> # <tag>`), the Renovate image (`renovate-version: <version>@<digest>`) and lint tool versions (`<NAME>_VERSION: <version>`) and tool versions in action scripts (`<NAME>_VERSION=<version>`)",
       "customType": "regex",
-      "managerFilePatterns": ["/^[^/]+/action\\.ya?ml$/", "/^\\.github/workflows/[^/]+\\.ya?ml$/"],
+      "managerFilePatterns": ["/^[^/]+/action\\.ya?ml$/", "/^[^/]+/[^/]+\\.sh$/", "/^\\.github/workflows/[^/]+\\.ya?ml$/"],
       "matchStrings": [
         "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\n\\s*ref: (?<currentDigest>[a-f0-9]{40}) # (?<currentValue>\\S+)",
         "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)(?: versioning=(?<versioning>\\S+))?\\n\\s*renovate-version: (?<currentValue>[^@\\s]+)@(?<currentDigest>sha256:[a-f0-9]{64})",
-        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\n\\s*[A-Z_]+_VERSION: (?<currentValue>\\S+)"
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\n\\s*[A-Z_]+_VERSION: (?<currentValue>\\S+)",
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\n[A-Z_]+_VERSION=(?<currentValue>\\S+)"
       ]
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "jq tags its releases jq-<version>, and setup-jq/install.sh pins the bare version",
+      "matchDepNames": ["jqlang/jq"],
+      "extractVersion": "^jq-(?<version>.+)$"
     }
   ]
 }

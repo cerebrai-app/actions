@@ -15,6 +15,11 @@ inputs:
 runs:
   using: composite
   steps:
+    # Self-hosted runners don't come with gh, which this action needs.
+    - name: Install gh
+      shell: bash
+      run: '"$GITHUB_ACTION_PATH/../setup-gh/install.sh"'
+
     - name: Checkout repository
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
@@ -33,6 +38,12 @@ runs:
         path: .marketplaces/ponytail
         fetch-depth: 1
         persist-credentials: false
+
+    # The ponytail plugin's Claude Code hooks run `node`, which self-hosted
+    # runners don't come with.
+    - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      with:
+        node-version: 24
 
     - name: Run ponytail review
       uses: anthropics/claude-code-action@4fa93a88de49bbef68b10eb15aabedf28ca0e1ed # v1.0.271

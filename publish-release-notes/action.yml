@@ -17,6 +17,11 @@ inputs:
 runs:
   using: composite
   steps:
+    # Self-hosted runners don't come with gh, which this action needs.
+    - name: Install gh
+      shell: bash
+      run: '"$GITHUB_ACTION_PATH/../setup-gh/install.sh"'
+
     - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
       with:
         name: release-notes

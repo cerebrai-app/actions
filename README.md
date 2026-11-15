@@ -11,6 +11,8 @@ Composite GitHub Actions shared by the cerebrai-app repositories.
 | [`renovate`](renovate/action.yml) | Runs self-hosted Renovate as a GitHub App |
 | [`release-notes`](release-notes/action.yml) | Writes the release notes for a `vX.Y.Z` tag with Claude Code, from the commits and PRs since the previous version, and uploads them as an artifact |
 | [`publish-release-notes`](publish-release-notes/action.yml) | Puts those notes on the tag's GitHub Release, creating it if needed. Runs in its own job with `contents: write` |
+| [`setup-gh`](setup-gh/action.yml) | Installs the GitHub CLI (`gh`), checked against the release's checksums and kept in the runner's tool cache, for self-hosted runners that don't come with it. The actions here that call `gh` already install it |
+| [`setup-jq`](setup-jq/action.yml) | Installs `jq`, checked against the release's checksums and kept in the runner's tool cache, for self-hosted runners that don't come with it. The actions here that call `jq` already install it |
 | [`setup-rust`](setup-rust/action.yml) | Installs a Rust toolchain (or the MSRV), the cargo cache and an optional arm64 Linux cross toolchain under QEMU. Exports `RUSTUP_TOOLCHAIN`, so the requested toolchain wins over a `rust-toolchain.toml` |
 
 Each `action.yml` documents its inputs.
@@ -20,7 +22,7 @@ There are also reusable workflows for Go repositories, which hold whole jobs rat
 | Workflow | What it does |
 | --- | --- |
 | [`go-ci.yml`](.github/workflows/go-ci.yml) | gofmt, `go mod tidy -diff`, golangci-lint, `go test -race`, a build and `go vet` for every release platform with Go's cross compiler, a test with the `go` version from go.mod, and govulncheck |
-| [`go-release.yml`](.github/workflows/go-release.yml) | On a `v*` tag: tests, builds every archive with GoReleaser on one `ubuntu-latest` runner, runs each Linux x86_64 binary, publishes the archives and `checksums.txt` as one GitHub Release with build attestations, and optionally updates Homebrew casks and Scoop manifests |
+| [`go-release.yml`](.github/workflows/go-release.yml) | On a `v*` tag: tests, builds every archive with GoReleaser on one `self-hosted` runner, runs each Linux x86_64 binary, publishes the archives and `checksums.txt` as one GitHub Release with build attestations, and optionally updates Homebrew casks and Scoop manifests |
 
 Their inputs are documented at the top of each file. See [Go repositories](#go-repositories) for callers.
 
@@ -166,11 +168,11 @@ Without the secrets or `tap-repositories`, the release is published as usual and
 that the casks and manifests were skipped. Prerelease tags never update them
 (`skip_upload: auto`).
 
-Everything runs on `ubuntu-latest`. `go-ci.yml` builds and vets linux/amd64, linux/arm64,
+Everything runs on the `self-hosted` runner label. `go-ci.yml` builds and vets linux/amd64, linux/arm64,
 darwin/amd64, darwin/arm64 and windows/amd64 with Go's cross compiler (`targets` changes the
 list; keep it in step with `.goreleaser.yaml`). Only the Linux x86_64 binaries and tests actually
 run; the other platforms are compiled and vetted, not executed. To also run the tests elsewhere,
-pass runners to `go-ci.yml`'s `os`, for example `'["ubuntu-latest", "windows-latest"]'`.
+pass runners to `go-ci.yml`'s `os`, for example `'["self-hosted", "windows-latest"]'`.
 
 `renovate.json`, for the Go modules and the pinned actions and workflows:
 
