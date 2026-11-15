@@ -39,6 +39,12 @@ runs:
         fetch-depth: 1
         persist-credentials: false
 
+    # The ponytail plugin's Claude Code hooks run `node`, which self-hosted
+    # runners don't come with.
+    - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      with:
+        node-version: 24
+
     - name: Run ponytail review
       uses: anthropics/claude-code-action@4fa93a88de49bbef68b10eb15aabedf28ca0e1ed # v1.0.271
       with:
