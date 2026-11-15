@@ -20,7 +20,7 @@ There are also reusable workflows for Go repositories, which hold whole jobs rat
 | Workflow | What it does |
 | --- | --- |
 | [`go-ci.yml`](.github/workflows/go-ci.yml) | gofmt, `go mod tidy -diff`, golangci-lint, `go test -race`, a build and `go vet` for every release platform with Go's cross compiler, a test with the `go` version from go.mod, and govulncheck |
-| [`go-release.yml`](.github/workflows/go-release.yml) | On a `v*` tag: tests, builds every archive with GoReleaser on one `ubuntu-latest` runner, runs each Linux x86_64 binary, publishes the archives and `checksums.txt` as one GitHub Release with build attestations, and optionally updates Homebrew casks and Scoop manifests |
+| [`go-release.yml`](.github/workflows/go-release.yml) | On a `v*` tag: tests, builds every archive with GoReleaser on one `self-hosted` runner, runs each Linux x86_64 binary, publishes the archives and `checksums.txt` as one GitHub Release with build attestations, and optionally updates Homebrew casks and Scoop manifests |
 
 Their inputs are documented at the top of each file. See [Go repositories](#go-repositories) for callers.
 
@@ -166,11 +166,11 @@ Without the secrets or `tap-repositories`, the release is published as usual and
 that the casks and manifests were skipped. Prerelease tags never update them
 (`skip_upload: auto`).
 
-Everything runs on `ubuntu-latest`. `go-ci.yml` builds and vets linux/amd64, linux/arm64,
+Everything runs on the `self-hosted` runner label. `go-ci.yml` builds and vets linux/amd64, linux/arm64,
 darwin/amd64, darwin/arm64 and windows/amd64 with Go's cross compiler (`targets` changes the
 list; keep it in step with `.goreleaser.yaml`). Only the Linux x86_64 binaries and tests actually
 run; the other platforms are compiled and vetted, not executed. To also run the tests elsewhere,
-pass runners to `go-ci.yml`'s `os`, for example `'["ubuntu-latest", "windows-latest"]'`.
+pass runners to `go-ci.yml`'s `os`, for example `'["self-hosted", "windows-latest"]'`.
 
 `renovate.json`, for the Go modules and the pinned actions and workflows:
 

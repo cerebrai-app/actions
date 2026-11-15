@@ -2,7 +2,7 @@ name: Go release
 
 # Reusable release for Go programs built with GoReleaser. On a tag like v1.2.3
 # it tests the tagged commit, builds every archive with GoReleaser on one
-# ubuntu-latest runner, runs each linux/amd64 binary, and then publishes:
+# self-hosted runner, runs each linux/amd64 binary, and then publishes:
 #
 #   1. a build provenance attestation for every archive (verify one with
 #      `gh attestation verify <file> --owner <owner>`);
@@ -70,7 +70,7 @@ env:
 jobs:
   build:
     name: Test and build
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     permissions:
       contents: read
     outputs:
@@ -171,7 +171,7 @@ jobs:
   tap-app:
     name: Check tap app
     if: ${{ inputs.tap-repositories != '' }}
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     permissions: {}
     env:
       TAP_APP_CLIENT_ID: ${{ secrets.tap-app-client-id }}
@@ -215,7 +215,7 @@ jobs:
       ${{ github.ref_type == 'tag' && !cancelled()
       && needs.build.result == 'success'
       && contains(fromJSON('["success", "skipped"]'), needs.tap-app.result) }}
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     permissions:
       contents: write # create the release
       id-token: write # sign the attestations
