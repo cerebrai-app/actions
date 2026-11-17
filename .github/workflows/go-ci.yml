@@ -139,8 +139,24 @@ jobs:
 
       - run: go build ./...
 
-      # The race detector needs cgo, and so a C compiler, which the Windows
-      # runner does not set up for Go; elsewhere every test runs with it.
+      # The race detector needs cgo, and so a C compiler. Self-hosted Linux
+      # runners may have none, and then Go turns cgo off and `-race` fails, so
+      # install gcc there. GitHub's Linux runners already have it.
+      - name: Install a C compiler for the race detector
+        if: ${{ runner.os == 'Linux' }}
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          if command -v "$(go env CC)" >/dev/null; then
+            echo "C compiler: $(command -v "$(go env CC)")"
+            exit 0
+          fi
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends gcc libc6-dev
+          go env CGO_ENABLED
+
+      # The Windows runner does not set up a C compiler for Go, so its tests
+      # run without the race detector; elsewhere every test runs with it.
       - run: go test ${{ runner.os != 'Windows' && '-race' || '' }} ./...
 
       - name: Smoke test
