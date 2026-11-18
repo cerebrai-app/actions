@@ -92,6 +92,12 @@ runs:
         GH_TOKEN: ${{ inputs.github-token }}
       with:
         claude_code_oauth_token: ${{ inputs.claude-code-oauth-token }}
+        # claude-code-action rejects push and release events, so callers start
+        # this from workflow_dispatch, and a dispatch from another workflow run
+        # has github-actions[bot] as its actor. Only workflows in the caller's
+        # repository can start a run as that bot, and the prompt holds no
+        # user-supplied text beyond the vX.Y.Z tag checked above.
+        allowed_bots: github-actions
         prompt: |
           Write the GitHub Release notes for ${{ inputs.tag }} of ${{ github.repository }}, and save them
           to `release-notes.md` in the repository root. Do not change any other file, and do not post
