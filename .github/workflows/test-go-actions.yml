@@ -19,7 +19,7 @@ env:
 jobs:
   lint:
     name: Lint
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -30,7 +30,7 @@ jobs:
 
   test:
     name: Test (${{ matrix.go }})
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
@@ -53,7 +53,7 @@ jobs:
 
   cross-build:
     name: Cross-build
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -64,7 +64,7 @@ jobs:
 
   govulncheck:
     name: govulncheck
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -75,7 +75,7 @@ jobs:
 
   build:
     name: Release build
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     outputs:
       go-version: ${{ steps.build.outputs.go-version }}
     steps:
@@ -94,7 +94,7 @@ jobs:
     name: Release publish
     needs: build
     if: ${{ github.ref_type == 'tag' }}
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     permissions:
       contents: write
       id-token: write
