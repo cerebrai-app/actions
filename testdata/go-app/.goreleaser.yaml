@@ -1,5 +1,5 @@
-# GoReleaser config for the test app that test-go-workflows.yml releases with
-# the shared go-release.yml. It mirrors what a real program repository uses.
+# GoReleaser config for the test app that test-go-actions.yml builds with the
+# go-release-build action. It mirrors what a real program repository uses.
 version: 2
 
 builds:
@@ -28,7 +28,7 @@ archives:
       - { goos: windows, formats: [zip] }
     wrap_in_directory: true
     # Fixed timestamps, so a rebuild of the same commit gives byte-identical
-    # archives, which go-release.yml's publish job relies on.
+    # archives, which go-release-publish relies on.
     builds_info:
       mtime: "{{ .CommitDate }}"
     files:

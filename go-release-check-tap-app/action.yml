@@ -1,0 +1,66 @@
+name: Go release check tap app
+description: >-
+  Check that the tap app can do what go-release-publish needs: create a token
+  for `tap-repositories` with Contents write, and read each of them. Run it on
+  every pull request and before the publish job, so a missing installation or
+  wrong secrets fail before anything is published. Without `app-client-id`
+  (e.g. a pull request from a fork, which gets no secrets) it only says so.
+  Needs no permissions: `permissions: {}`. No checkout needed.
+
+inputs:
+  tap-repositories:
+    description: >-
+      Comma-separated repositories of the caller's owner that the Homebrew
+      casks and Scoop manifests are pushed to, e.g. `homebrew-tap,scoop-bucket`.
+    required: true
+  app-client-id:
+    description: >-
+      Client ID of a GitHub App installed on `tap-repositories` with read/write
+      on Contents (pass a secret).
+    required: false
+    default: ''
+  app-private-key:
+    description: The app's private key, the whole .pem file (pass a secret).
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - name: Skip without app secrets
+      if: ${{ inputs.app-client-id == '' }}
+      shell: bash
+      run: echo "::notice::No tap app client ID in this run, so the tap app was not checked."
+
+    - name: Create tap token
+      id: tap-token
+      if: ${{ inputs.app-client-id != '' }}
+      uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
+      with:
+        client-id: ${{ inputs.app-client-id }}
+        private-key: ${{ inputs.app-private-key }}
+        owner: ${{ github.repository_owner }}
+        repositories: ${{ inputs.tap-repositories }}
+        permission-contents: write
+
+    # Self-hosted runners don't come with gh.
+    - name: Install gh
+      if: ${{ steps.tap-token.outputs.token != '' }}
+      shell: bash
+      run: '"$GITHUB_ACTION_PATH/../setup-gh/install.sh"'
+
+    - name: Read each tap repository with the token
+      if: ${{ steps.tap-token.outputs.token != '' }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ steps.tap-token.outputs.token }}
+        OWNER: ${{ github.repository_owner }}
+        TAP_REPOSITORIES: ${{ inputs.tap-repositories }}
+      run: |
+        set -euo pipefail
+        IFS=, read -ra repos <<< "$TAP_REPOSITORIES"
+        for repo in "${repos[@]}"; do
+          repo=$(echo "$repo" | xargs) # trim spaces
+          branch=$(gh api "repos/$OWNER/$repo" --jq .default_branch)
+          echo "ok $OWNER/$repo (default branch $branch)"
+        done

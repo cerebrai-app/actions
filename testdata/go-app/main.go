@@ -1,4 +1,4 @@
-// Command go-app is a minimal program for testing the reusable Go workflows.
+// Command go-app is a minimal program for testing the Go actions.
 package main
 
 import (

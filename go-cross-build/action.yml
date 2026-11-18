@@ -1,0 +1,50 @@
+name: Go cross-build
+description: >-
+  Build and `go vet` a Go module for every platform in `targets` with Go's
+  cross compiler and cgo off, on the latest stable Go, so code and tests
+  behind build tags for other platforms compile. Check out the repository
+  first. Needs only contents: read.
+
+inputs:
+  working-directory:
+    description: Directory with the module's go.mod, relative to the repository root.
+    required: false
+    default: .
+  targets:
+    description: >-
+      Space-separated `goos/goarch` pairs. Match the builds in the caller's
+      `.goreleaser.yaml`.
+    required: false
+    default: linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64
+
+runs:
+  using: composite
+  steps:
+    - name: Use the installed Go only
+      shell: bash
+      run: echo "GOTOOLCHAIN=local" >> "$GITHUB_ENV"
+
+    - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      with:
+        go-version: stable
+        cache-dependency-path: |
+          ${{ inputs.working-directory }}/go.mod
+          ${{ inputs.working-directory }}/go.sum
+
+    # `go vet` type-checks the tests too, so a test file behind a build tag for
+    # another platform cannot rot unnoticed.
+    - name: Build and vet each target
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        GO_TARGETS: ${{ inputs.targets }}
+        CGO_ENABLED: '0'
+      run: |
+        set -euo pipefail
+        read -ra targets <<< "$GO_TARGETS"
+        for target in "${targets[@]}"; do
+          echo "::group::$target"
+          GOOS=${target%/*} GOARCH=${target#*/} go build ./...
+          GOOS=${target%/*} GOARCH=${target#*/} go vet ./...
+          echo "::endgroup::"
+        done

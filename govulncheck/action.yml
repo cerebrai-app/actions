@@ -1,0 +1,34 @@
+name: govulncheck
+description: >-
+  Check a Go module for known vulnerabilities in the code paths it actually
+  calls, on the latest stable Go (what releases are built with, so a standard
+  library fix only needs a new release, not a code change). Check out the
+  repository first. Needs only contents: read.
+
+inputs:
+  working-directory:
+    description: Directory with the module's go.mod, relative to the repository root.
+    required: false
+    default: .
+
+runs:
+  using: composite
+  steps:
+    - name: Use the installed Go only
+      shell: bash
+      run: echo "GOTOOLCHAIN=local" >> "$GITHUB_ENV"
+
+    - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      with:
+        go-version: stable
+        cache-dependency-path: |
+          ${{ inputs.working-directory }}/go.mod
+          ${{ inputs.working-directory }}/go.sum
+
+    - name: govulncheck
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        # renovate: datasource=go depName=golang.org/x/vuln
+        GOVULNCHECK_VERSION: v1.9.0
+      run: go run "golang.org/x/vuln/cmd/govulncheck@$GOVULNCHECK_VERSION" ./...
