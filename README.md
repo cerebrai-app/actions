@@ -11,8 +11,8 @@ Composite GitHub Actions shared by the cerebrai-app repositories.
 | [`renovate`](renovate/action.yml) | Runs self-hosted Renovate as a GitHub App |
 | [`release-notes`](release-notes/action.yml) | Writes the release notes for a `vX.Y.Z` tag with Claude Code, from the commits and PRs since the previous version, and uploads them as an artifact |
 | [`publish-release-notes`](publish-release-notes/action.yml) | Puts those notes on the tag's GitHub Release, creating it if needed. Runs in its own job with `contents: write` |
-| [`setup-gh`](setup-gh/action.yml) | Installs the GitHub CLI (`gh`), checked against the release's checksums and kept in the runner's tool cache, for self-hosted runners that don't come with it. The actions here that call `gh` already install it |
-| [`setup-jq`](setup-jq/action.yml) | Installs `jq`, checked against the release's checksums and kept in the runner's tool cache, for self-hosted runners that don't come with it. The actions here that call `jq` already install it |
+| [`setup-gh`](setup-gh/action.yml) | Installs the GitHub CLI (`gh`), checked against the release's checksums and kept in the runner's tool cache, for runners that don't come with it (e.g. self-hosted ones). The actions here that call `gh` already install it |
+| [`setup-jq`](setup-jq/action.yml) | Installs `jq`, checked against the release's checksums and kept in the runner's tool cache, for runners that don't come with it (e.g. self-hosted ones). The actions here that call `jq` already install it |
 | [`go-lint`](go-lint/action.yml) | gofmt, `go mod tidy -diff` and golangci-lint for a Go module |
 | [`go-test`](go-test/action.yml) | `go build` and `go test -race` on the latest stable Go or exactly the `go` version from go.mod, and an optional smoke test of each main package |
 | [`go-cross-build`](go-cross-build/action.yml) | `go build` and `go vet` for every release platform with Go's cross compiler |
@@ -87,7 +87,7 @@ concurrency:
 jobs:
   lint:
     name: Lint
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -98,7 +98,7 @@ jobs:
   # the go version from go.mod, so the declared minimum is a tested one.
   test:
     name: Test (${{ matrix.go }})
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
@@ -120,7 +120,7 @@ jobs:
 
   cross-build:
     name: Cross-build
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -129,7 +129,7 @@ jobs:
 
   govulncheck:
     name: govulncheck
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -164,7 +164,7 @@ concurrency:
 jobs:
   build:
     name: Test and build
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     outputs:
       go-version: ${{ steps.build.outputs.go-version }}
     steps:
@@ -177,7 +177,7 @@ jobs:
 
   tap-app:
     name: Check tap app
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     permissions: {}
     steps:
       - uses: cerebrai-app/actions/go-release-check-tap-app@<commit sha> # v4
@@ -190,7 +190,7 @@ jobs:
     name: Publish release
     needs: [build, tap-app]
     if: ${{ github.ref_type == 'tag' }}
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     permissions:
       contents: write # create the release
       id-token: write # sign the build attestations
@@ -254,12 +254,12 @@ Dependabot) skip the check with a notice.
 
 Prerelease tags never update the casks and manifests (`skip_upload: auto`).
 
-Everything runs on the `self-hosted` runner label. `go-cross-build` builds and vets linux/amd64,
+Everything runs on `ubuntu-latest`. `go-cross-build` builds and vets linux/amd64,
 linux/arm64, darwin/amd64, darwin/arm64, windows/amd64 and windows/arm64 with Go's cross compiler
 (`targets` changes the list; keep it in step with `.goreleaser.yaml`). Only the Linux x86_64
 binaries and tests actually run; the other platforms are compiled and vetted, not executed. To
 also run the tests elsewhere, add runners to the `test` job's matrix, for example
-`os: [self-hosted, windows-latest]` with `runs-on: ${{ matrix.os }}`.
+`os: [ubuntu-latest, windows-latest]` with `runs-on: ${{ matrix.os }}`.
 
 `renovate.json`, for the Go modules and the pinned actions:
 
