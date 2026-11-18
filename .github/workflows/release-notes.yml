@@ -100,8 +100,7 @@ jobs:
           tag: ${{ env.TAG }}
           rewrite: ${{ inputs.rewrite }}
           about: >-
-            Composite GitHub Actions (each `<name>/action.yml`) and reusable workflows
-            (`.github/workflows/go-ci.yml`, `.github/workflows/go-release.yml`) that other
+            Composite GitHub Actions (each `<name>/action.yml`) that other
             cerebrai-app repositories pin by commit, with the tag as a comment. Readers maintain
             those repositories and decide whether to bump their pin and what they must change
             when they do.

@@ -1,0 +1,114 @@
+name: Go test
+description: >-
+  Build and test a Go module, with the race detector where the runner allows
+  it, and optionally run each main package as a smoke test. Check out the
+  repository first. Needs only contents: read. Run it once with the default
+  `go-version: stable`, and once with `go-version: go.mod` and `race: 'false'`
+  so the minimum Go the module declares is a tested one.
+
+inputs:
+  working-directory:
+    description: Directory with the module's go.mod, relative to the repository root.
+    required: false
+    default: .
+  go-version:
+    description: >-
+      `stable` (the latest Go), `go.mod` (exactly the version on go.mod's `go`
+      line, not its `toolchain` line, since only the `go` line is the
+      minimum), or a version for actions/setup-go.
+    required: false
+    default: stable
+  race:
+    description: >-
+      'true' runs the tests with -race, installing gcc on Linux runners that
+      have no C compiler. Windows runners always test without it.
+    required: false
+    default: 'true'
+  main-packages:
+    description: >-
+      Space-separated main packages, relative to `working-directory`, for the
+      smoke test, e.g. `./cmd/brainctl ./cmd/workctl`.
+    required: false
+    default: .
+  smoke-test-args:
+    description: >-
+      Arguments for the smoke test, e.g. `version`: it runs `go run <package>
+      <args>` for each of `main-packages` and only checks that it exits 0.
+      Empty (the default, for libraries) skips it.
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    # Go must not quietly download another toolchain, or a go.mod run would not
+    # test the version it claims to.
+    - name: Resolve the Go version
+      id: go
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        GO_VERSION: ${{ inputs.go-version }}
+      run: |
+        echo "GOTOOLCHAIN=local" >> "$GITHUB_ENV"
+        if [[ "$GO_VERSION" == "go.mod" ]]; then
+          GO_VERSION=$(awk '$1 == "go" { print $2; exit }' go.mod)
+          if [[ -z "$GO_VERSION" ]]; then
+            echo "::error::no go line in go.mod"
+            exit 1
+          fi
+          echo "go.mod requires go $GO_VERSION"
+        fi
+        echo "version=$GO_VERSION" >> "$GITHUB_OUTPUT"
+
+    - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      with:
+        go-version: ${{ steps.go.outputs.version }}
+        cache-dependency-path: |
+          ${{ inputs.working-directory }}/go.mod
+          ${{ inputs.working-directory }}/go.sum
+
+    - name: go build
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        go version
+        go build ./...
+
+    # The race detector needs cgo, and so a C compiler. Self-hosted Linux
+    # runners may have none, and then Go turns cgo off and `-race` fails, so
+    # install gcc there. GitHub's Linux runners already have it.
+    - name: Install a C compiler for the race detector
+      if: ${{ inputs.race == 'true' && runner.os == 'Linux' }}
+      shell: bash
+      env:
+        DEBIAN_FRONTEND: noninteractive
+      run: |
+        if command -v "$(go env CC)" >/dev/null; then
+          echo "C compiler: $(command -v "$(go env CC)")"
+          exit 0
+        fi
+        sudo apt-get update -qq
+        sudo apt-get install -y -qq --no-install-recommends gcc libc6-dev
+        go env CGO_ENABLED
+
+    # The Windows runner does not set up a C compiler for Go, so its tests run
+    # without the race detector.
+    - name: go test
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: go test ${{ inputs.race == 'true' && runner.os != 'Windows' && '-race' || '' }} ./...
+
+    - name: Smoke test
+      if: ${{ inputs.smoke-test-args != '' }}
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        MAIN_PACKAGES: ${{ inputs.main-packages }}
+        SMOKE_TEST_ARGS: ${{ inputs.smoke-test-args }}
+      run: |
+        read -ra packages <<< "$MAIN_PACKAGES"
+        read -ra args <<< "$SMOKE_TEST_ARGS"
+        for pkg in "${packages[@]}"; do
+          go run "$pkg" "${args[@]}"
+        done

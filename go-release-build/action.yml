@@ -1,0 +1,135 @@
+name: Go release build
+description: >-
+  Test a Go module and build every archive with GoReleaser, run each
+  linux/amd64 binary, and upload the archives and checksums.txt as the
+  `release` artifact for go-release-publish. On a tag, the tag must be
+  vX.Y.Z[-prerelease] on a commit of the default branch; on anything else it
+  builds a snapshot, so a pull request checks the release before a tag. Check
+  out the repository with full history first (`fetch-depth: 0`). Needs only
+  contents: read. The module's .goreleaser.yaml must disable `release` and
+  `changelog`, set snapshot.version_template and build reproducibly (see the
+  README).
+
+inputs:
+  working-directory:
+    description: Directory with the module's go.mod and .goreleaser.yaml, relative to the repository root.
+    required: false
+    default: .
+  smoke-test-args:
+    description: >-
+      Arguments to run each linux/amd64 binary with (the runner can only run
+      those). The output must be exactly `<binary name> <version>`. Empty
+      skips it.
+    required: false
+    default: version
+
+outputs:
+  go-version:
+    description: The Go version the archives were built with. Pass it to go-release-publish, which rebuilds with exactly this Go.
+    value: ${{ steps.go.outputs.version }}
+
+runs:
+  using: composite
+  steps:
+    - name: Pin tool versions
+      id: versions
+      shell: bash
+      env:
+        # renovate: datasource=github-releases depName=goreleaser/goreleaser
+        GORELEASER_VERSION: v2.20.2
+      run: |
+        echo "GOTOOLCHAIN=local" >> "$GITHUB_ENV"
+        echo "goreleaser=$GORELEASER_VERSION" >> "$GITHUB_OUTPUT"
+
+    # Require the tagged commit to be on the default branch, so a tag pushed on
+    # a feature branch cannot publish unreviewed code. (A tag protection rule
+    # for v* in the repository settings is the other half of this.)
+    - name: Tagged commit must be on the default branch
+      if: ${{ github.ref_type == 'tag' }}
+      shell: bash
+      env:
+        DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      run: |
+        if [[ ! "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+          echo "::error::tag $GITHUB_REF_NAME is not v<major>.<minor>.<patch>[-<prerelease>]"
+          exit 1
+        fi
+        if ! git merge-base --is-ancestor "$GITHUB_SHA" "origin/$DEFAULT_BRANCH"; then
+          echo "::error::tag $GITHUB_REF_NAME points at $GITHUB_SHA, which is not on $DEFAULT_BRANCH (check out with fetch-depth: 0)"
+          exit 1
+        fi
+
+    # No cache: a poisoned cache entry would end up in a published binary.
+    - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      with:
+        go-version: stable
+        cache: false
+
+    - name: Record the Go version
+      id: go
+      shell: bash
+      run: echo "version=$(go env GOVERSION | sed 's/^go//')" >> "$GITHUB_OUTPUT"
+
+    # Gate: a tag on a commit whose tests fail must not build or publish anything.
+    - name: go test
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: go test ./...
+
+    - uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
+      with:
+        version: ${{ steps.versions.outputs.goreleaser }}
+        workdir: ${{ inputs.working-directory }}
+        args: >-
+          release --clean --skip=publish
+          ${{ github.ref_type != 'tag' && '--snapshot' || '' }}
+
+    # Self-hosted runners don't come with jq, which reads GoReleaser's metadata
+    # in the next two steps.
+    - name: Install jq
+      shell: bash
+      run: '"$GITHUB_ACTION_PATH/../setup-jq/install.sh"'
+
+    # Run each binary that is about to be published, where the runner can: it
+    # must start and report its own version, which also proves the version
+    # made it into the binary.
+    - name: Smoke test
+      if: ${{ inputs.smoke-test-args != '' }}
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        SMOKE_TEST_ARGS: ${{ inputs.smoke-test-args }}
+      run: |
+        set -euo pipefail
+        read -ra args <<< "$SMOKE_TEST_ARGS"
+        version=$(jq -r .version dist/metadata.json)
+        binaries=$(jq -r '.[] | select(.type == "Binary" and .goos == "linux" and .goarch == "amd64")
+          | "\(.extra.Binary)\t\(.path)"' dist/artifacts.json)
+        if [[ -z "$binaries" ]]; then
+          echo "::warning::no linux/amd64 binary, so nothing was smoke-tested"
+          exit 0
+        fi
+        while IFS=$'\t' read -r bin path; do
+          out=$("./$path" "${args[@]}")
+          echo "$out"
+          if [[ "$out" != "$bin $version" ]]; then
+            echo "::error::expected \"$bin $version\" from $bin ${args[*]}, got \"$out\""
+            exit 1
+          fi
+        done <<< "$binaries"
+
+    - name: Collect release files
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        set -euo pipefail
+        mkdir -p "$RUNNER_TEMP/release"
+        jq -r '.[] | select(.type == "Archive" or .type == "Checksum") | .path' dist/artifacts.json \
+          | xargs -I{} cp {} "$RUNNER_TEMP/release/"
+        ls -l "$RUNNER_TEMP/release"
+
+    - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      with:
+        name: release
+        path: ${{ runner.temp }}/release/*
+        if-no-files-found: error

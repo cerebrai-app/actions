@@ -1,0 +1,56 @@
+name: Go lint
+description: >-
+  Check a Go module with gofmt, `go mod tidy -diff` and golangci-lint, on the
+  latest stable Go. Check out the repository first. Needs only contents: read.
+
+inputs:
+  working-directory:
+    description: Directory with the module's go.mod, relative to the repository root.
+    required: false
+    default: .
+
+runs:
+  using: composite
+  steps:
+    # Go must not quietly download another toolchain (for a `toolchain` line in
+    # go.mod, say); a go.mod that needs a newer Go than installed fails.
+    - name: Pin tool versions
+      id: versions
+      shell: bash
+      env:
+        # renovate: datasource=github-releases depName=golangci/golangci-lint
+        GOLANGCI_LINT_VERSION: v2.15.0
+      run: |
+        echo "GOTOOLCHAIN=local" >> "$GITHUB_ENV"
+        echo "golangci-lint=$GOLANGCI_LINT_VERSION" >> "$GITHUB_OUTPUT"
+
+    - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      with:
+        go-version: stable
+        cache-dependency-path: |
+          ${{ inputs.working-directory }}/go.mod
+          ${{ inputs.working-directory }}/go.sum
+
+    - name: gofmt
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        unformatted=$(gofmt -l .)
+        if [[ -n "$unformatted" ]]; then
+          echo "::error::these files are not gofmt-formatted (run gofmt -w .):"
+          echo "$unformatted"
+          gofmt -d .
+          exit 1
+        fi
+
+    # The go.mod/go.sum counterpart of `cargo --locked`: a PR that changes
+    # imports must commit the matching go.mod and go.sum.
+    - name: go mod tidy
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: go mod tidy -diff
+
+    - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+      with:
+        version: ${{ steps.versions.outputs.golangci-lint }}
+        working-directory: ${{ inputs.working-directory }}

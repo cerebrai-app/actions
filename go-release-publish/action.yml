@@ -1,0 +1,161 @@
+name: Go release publish
+description: >-
+  Publish what go-release-build built for a vX.Y.Z tag: a build provenance
+  attestation for every archive, the GitHub Release with the archives and
+  checksums.txt, and optionally the Homebrew casks and Scoop manifests from
+  .goreleaser.yaml, pushed with a GitHub App token that can write to the tap
+  repositories only, after checking that GoReleaser's rebuild matches the
+  released archives. Run it only on tags, in a job that needs the build job
+  (and go-release-check-tap-app's), with contents: write, id-token: write and
+  attestations: write. Check out the repository with full history first
+  (`fetch-depth: 0`). Re-running it is safe: an existing release gets the
+  files uploaded and keeps its notes.
+
+inputs:
+  working-directory:
+    description: Directory with the module's go.mod and .goreleaser.yaml, relative to the repository root.
+    required: false
+    default: .
+  go-version:
+    description: go-release-build's `go-version` output, so the rebuild for the casks and manifests matches.
+    required: true
+  tap-repositories:
+    description: >-
+      Comma-separated repositories of the caller's owner that the Homebrew
+      casks and Scoop manifests are pushed to. Empty (or no `app-client-id`)
+      publishes the release without them.
+    required: false
+    default: ''
+  app-client-id:
+    description: Client ID of the tap app (pass a secret).
+    required: false
+    default: ''
+  app-private-key:
+    description: The tap app's private key, the whole .pem file (pass a secret).
+    required: false
+    default: ''
+  github-token:
+    description: Token that creates the release (needs contents write).
+    required: false
+    default: ${{ github.token }}
+
+runs:
+  using: composite
+  steps:
+    - name: Pin tool versions
+      id: versions
+      shell: bash
+      env:
+        # renovate: datasource=github-releases depName=goreleaser/goreleaser
+        GORELEASER_VERSION: v2.20.2
+      run: |
+        echo "GOTOOLCHAIN=local" >> "$GITHUB_ENV"
+        echo "goreleaser=$GORELEASER_VERSION" >> "$GITHUB_OUTPUT"
+
+    # Self-hosted runners don't come with gh, which creates the release.
+    - name: Install gh
+      shell: bash
+      run: '"$GITHUB_ACTION_PATH/../setup-gh/install.sh"'
+
+    - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      with:
+        name: release
+        path: ${{ runner.temp }}/release
+
+    - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+      with:
+        subject-checksums: ${{ runner.temp }}/release/checksums.txt
+
+    # If the release already exists (created from the web UI, by a release
+    # notes workflow that ran first, or by an earlier attempt of this job),
+    # upload the files to it and keep its title and notes.
+    - name: Create release
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        GH_REPO: ${{ github.repository }}
+      run: |
+        if [[ "$GITHUB_REF_TYPE" != "tag" ]]; then
+          echo "::error::go-release-publish runs only on tags (got $GITHUB_REF_TYPE $GITHUB_REF_NAME)"
+          exit 1
+        fi
+        ls -l "$RUNNER_TEMP/release"
+        if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+          echo "::notice::release $GITHUB_REF_NAME already exists; uploading the files to it"
+          gh release upload "$GITHUB_REF_NAME" "$RUNNER_TEMP"/release/* --clobber
+          exit 0
+        fi
+        prerelease=()
+        [[ "$GITHUB_REF_NAME" == *-* ]] && prerelease=(--prerelease)
+        gh release create "$GITHUB_REF_NAME" "$RUNNER_TEMP"/release/* \
+          --title "$GITHUB_REF_NAME" --generate-notes --verify-tag "${prerelease[@]}"
+
+    - name: Skip the casks and manifests without an app
+      if: ${{ inputs.app-client-id == '' || inputs.tap-repositories == '' }}
+      shell: bash
+      run: echo "::notice::No tap app client ID or tap-repositories, so no Homebrew casks or Scoop manifests were published."
+
+    # GoReleaser rebuilds and pushes the casks and manifests. Its `release`
+    # section is disabled, and its only token is the app's, which can write to
+    # the tap repositories and nothing else.
+    - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      if: ${{ inputs.app-client-id != '' && inputs.tap-repositories != '' }}
+      with:
+        go-version: ${{ inputs.go-version }}
+        cache: false
+
+    - name: Create tap token
+      id: tap-token
+      if: ${{ inputs.app-client-id != '' && inputs.tap-repositories != '' }}
+      uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
+      with:
+        client-id: ${{ inputs.app-client-id }}
+        private-key: ${{ inputs.app-private-key }}
+        owner: ${{ github.repository_owner }}
+        repositories: ${{ inputs.tap-repositories }}
+        permission-contents: write
+
+    # The casks and manifests carry the checksums of GoReleaser's own build, so
+    # rebuild first (publishing nothing) and require the archives to match the
+    # released ones before anything is pushed to the tap repositories.
+    # (GoReleaser's before_publish hook would do this in one run, but it is a
+    # Pro feature.)
+    - name: Rebuild without publishing
+      if: ${{ steps.tap-token.outputs.token != '' }}
+      uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
+      with:
+        version: ${{ steps.versions.outputs.goreleaser }}
+        workdir: ${{ inputs.working-directory }}
+        args: release --clean --skip=publish
+
+    - name: Rebuilt archives must match the release
+      if: ${{ steps.tap-token.outputs.token != '' }}
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        if ! diff -u "$RUNNER_TEMP/release/checksums.txt" dist/checksums.txt; then
+          echo "::error::the rebuild for the casks and manifests differs from the released archives, so nothing was pushed to the tap repositories; check that .goreleaser.yaml builds reproducibly"
+          exit 1
+        fi
+
+    - name: Publish casks and manifests
+      if: ${{ steps.tap-token.outputs.token != '' }}
+      uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
+      with:
+        version: ${{ steps.versions.outputs.goreleaser }}
+        workdir: ${{ inputs.working-directory }}
+        args: release --clean
+      env:
+        GITHUB_TOKEN: ${{ steps.tap-token.outputs.token }}
+        TAP_GITHUB_TOKEN: ${{ steps.tap-token.outputs.token }}
+
+    # Same check on the build that was actually published.
+    - name: Published checksums must match the release
+      if: ${{ steps.tap-token.outputs.token != '' }}
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        if ! diff -u "$RUNNER_TEMP/release/checksums.txt" dist/checksums.txt; then
+          echo "::error::the casks and manifests just published carry checksums that differ from the released archives, so brew and scoop will refuse to install them; check that .goreleaser.yaml builds reproducibly"
+          exit 1
+        fi

@@ -1,5 +1,5 @@
-// Command go-tool is a second program in the go-app module, so the reusable
-// Go workflows are tested with more than one main package.
+// Command go-tool is a second program in the go-app module, so the Go actions
+// are tested with more than one main package.
 package main
 
 import "fmt"

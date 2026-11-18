@@ -13,18 +13,16 @@ Composite GitHub Actions shared by the cerebrai-app repositories.
 | [`publish-release-notes`](publish-release-notes/action.yml) | Puts those notes on the tag's GitHub Release, creating it if needed. Runs in its own job with `contents: write` |
 | [`setup-gh`](setup-gh/action.yml) | Installs the GitHub CLI (`gh`), checked against the release's checksums and kept in the runner's tool cache, for self-hosted runners that don't come with it. The actions here that call `gh` already install it |
 | [`setup-jq`](setup-jq/action.yml) | Installs `jq`, checked against the release's checksums and kept in the runner's tool cache, for self-hosted runners that don't come with it. The actions here that call `jq` already install it |
+| [`go-lint`](go-lint/action.yml) | gofmt, `go mod tidy -diff` and golangci-lint for a Go module |
+| [`go-test`](go-test/action.yml) | `go build` and `go test -race` on the latest stable Go or exactly the `go` version from go.mod, and an optional smoke test of each main package |
+| [`go-cross-build`](go-cross-build/action.yml) | `go build` and `go vet` for every release platform with Go's cross compiler |
+| [`govulncheck`](govulncheck/action.yml) | Known vulnerabilities in the code paths a Go module actually calls |
+| [`go-release-build`](go-release-build/action.yml) | Tests a Go module, builds every archive with GoReleaser, runs each Linux x86_64 binary and uploads the archives for `go-release-publish`. Builds a snapshot off tags |
+| [`go-release-check-tap-app`](go-release-check-tap-app/action.yml) | Checks that the GitHub App can write to the Homebrew tap and Scoop bucket repositories |
+| [`go-release-publish`](go-release-publish/action.yml) | On a `vX.Y.Z` tag: build attestations, the GitHub Release with the archives and `checksums.txt`, and optionally the Homebrew casks and Scoop manifests |
 | [`setup-rust`](setup-rust/action.yml) | Installs a Rust toolchain (or the MSRV), the cargo cache and an optional arm64 Linux cross toolchain under QEMU. Exports `RUSTUP_TOOLCHAIN`, so the requested toolchain wins over a `rust-toolchain.toml` |
 
 Each `action.yml` documents its inputs.
-
-There are also reusable workflows for Go repositories, which hold whole jobs rather than steps:
-
-| Workflow | What it does |
-| --- | --- |
-| [`go-ci.yml`](.github/workflows/go-ci.yml) | gofmt, `go mod tidy -diff`, golangci-lint, `go test -race`, a build and `go vet` for every release platform with Go's cross compiler, a test with the `go` version from go.mod, and govulncheck |
-| [`go-release.yml`](.github/workflows/go-release.yml) | On a `v*` tag: tests, builds every archive with GoReleaser on one `self-hosted` runner, runs each Linux x86_64 binary, publishes the archives and `checksums.txt` as one GitHub Release with build attestations, and optionally updates Homebrew casks and Scoop manifests |
-
-Their inputs are documented at the top of each file. See [Go repositories](#go-repositories) for callers.
 
 ## What stays in the calling workflow
 
@@ -37,6 +35,8 @@ repository's workflow:
   third-party plugin should not get write access. The same goes for `release-notes` and
   `publish-release-notes`: Claude writes the notes in a job that can only read.
 - **Secrets.** Actions can't read `secrets`, so pass them as inputs.
+- **Jobs**: which actions run in parallel, a `matrix`, `needs` between jobs and their outputs.
+  Each action documents the job it expects; the Go callers below show a full set.
 
 ## Usage
 
@@ -57,11 +57,13 @@ Full callers:
 
 ## Go repositories
 
-A Go repository calls the reusable workflows for CI and releases, and the composite actions
-above for Claude and Renovate, as any other repository does. The Go programs live together in
+A Go repository uses the Go actions above in its own CI and release jobs, and the other actions
+for Claude and Renovate, as any other repository does. The Go programs live together in
 [go-cerebrai](https://github.com/cerebrai-app/go-cerebrai), one module with a `cmd/<name>`
 package per program and their shared code under `internal/`. They are released together, under
-one version. The examples below are its callers.
+one version. The examples below are its workflows. Each job checks out the repository and runs
+one action; the actions set up Go themselves. For a module outside the repository root, pass
+`working-directory` to each action.
 
 `.github/workflows/ci.yml`:
 
@@ -83,23 +85,74 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  ci:
-    uses: cerebrai-app/actions/.github/workflows/go-ci.yml@<commit sha> # v3
-    with:
-      main-packages: ./cmd/brainctl ./cmd/workctl
-      smoke-test-args: version # omit for a library
+  lint:
+    name: Lint
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: cerebrai-app/actions/go-lint@<commit sha> # v4
+
+  # The latest stable Go with the race detector and a smoke test, and exactly
+  # the go version from go.mod, so the declared minimum is a tested one.
+  test:
+    name: Test (${{ matrix.go }})
+    runs-on: self-hosted
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - go: stable
+            race: 'true'
+          - go: go.mod
+            race: 'false'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: cerebrai-app/actions/go-test@<commit sha> # v4
+        with:
+          go-version: ${{ matrix.go }}
+          race: ${{ matrix.race }}
+          main-packages: ./cmd/brainctl ./cmd/workctl
+          smoke-test-args: ${{ matrix.go == 'stable' && 'version' || '' }}
+
+  cross-build:
+    name: Cross-build
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: cerebrai-app/actions/go-cross-build@<commit sha> # v4
+
+  govulncheck:
+    name: govulncheck
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: cerebrai-app/actions/govulncheck@<commit sha> # v4
 ```
+
+For a library, leave out `main-packages` and `smoke-test-args`.
 
 `.github/workflows/release.yml`:
 
 ```yaml
 name: Release
 
+# A tag like v0.1.0 builds every program for each platform with GoReleaser
+# (.goreleaser.yaml) and publishes them in one GitHub Release, then pushes the
+# Homebrew casks and Scoop manifests. Every pull request builds a snapshot and
+# checks the tap app, and publishes nothing, so a broken release shows up
+# before a tag.
 on:
   push:
     tags: ["v*"]
-  pull_request: # builds a snapshot of everything, publishes nothing
-    paths: [".github/workflows/release.yml", ".goreleaser.yaml"]
+  pull_request:
 
 permissions:
   contents: read
@@ -109,34 +162,70 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  release:
-    uses: cerebrai-app/actions/.github/workflows/go-release.yml@<commit sha> # v3
+  build:
+    name: Test and build
+    runs-on: self-hosted
+    outputs:
+      go-version: ${{ steps.build.outputs.go-version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # GoReleaser and the default-branch check need the history and tags
+          persist-credentials: false
+      - id: build
+        uses: cerebrai-app/actions/go-release-build@<commit sha> # v4
+
+  tap-app:
+    name: Check tap app
+    runs-on: self-hosted
+    permissions: {}
+    steps:
+      - uses: cerebrai-app/actions/go-release-check-tap-app@<commit sha> # v4
+        with:
+          tap-repositories: homebrew-tap,scoop-bucket
+          app-client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+          app-private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+
+  publish:
+    name: Publish release
+    needs: [build, tap-app]
+    if: ${{ github.ref_type == 'tag' }}
+    runs-on: self-hosted
     permissions:
       contents: write # create the release
       id-token: write # sign the build attestations
       attestations: write # store them
-    with:
-      tap-repositories: homebrew-tap,scoop-bucket # optional, see below
-    secrets:
-      tap-app-client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
-      tap-app-private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: cerebrai-app/actions/go-release-publish@<commit sha> # v4
+        with:
+          go-version: ${{ needs.build.outputs.go-version }}
+          tap-repositories: homebrew-tap,scoop-bucket
+          app-client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+          app-private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
 ```
 
-Releases are built with [GoReleaser](https://goreleaser.com), pinned in `go-release.yml`. What to
-build lives in the caller's `.goreleaser.yaml`; see
-[go-cerebrai's](https://github.com/cerebrai-app/go-cerebrai/blob/main/.goreleaser.yaml) and
-[the test app's](testdata/go-app/.goreleaser.yaml). The workflow requires that config to:
+Without Homebrew and Scoop, leave out the `tap-app` job (and `tap-app` from `needs`) and the
+`tap-repositories` and app inputs of `go-release-publish`.
 
-- disable `release` and `changelog`. The workflow's publish job creates the release itself, so
+Releases are built with [GoReleaser](https://goreleaser.com), pinned in `go-release-build` and
+`go-release-publish`. What to build lives in the caller's `.goreleaser.yaml`; see
+[go-cerebrai's](https://github.com/cerebrai-app/go-cerebrai/blob/main/.goreleaser.yaml) and
+[the test app's](testdata/go-app/.goreleaser.yaml). The actions require that config to:
+
+- disable `release` and `changelog`. `go-release-publish` creates the release itself, so
   GoReleaser never gets a token that can write to the calling repository.
 - set `snapshot.version_template`, the version pull request builds report (e.g. `0.0.0-dev`).
 - link `{{ .Version }}` (the tag without its `v`) into each binary, which prints
-  `<binary> <version>` for `<binary> version`. Before publishing anything, the workflow runs
-  every linux/amd64 binary with `version` and checks that output (`smoke-test-args` changes the
-  arguments; empty skips the check).
+  `<binary> <version>` for `<binary> version`. Before anything is uploaded, `go-release-build`
+  runs every linux/amd64 binary with `version` and checks that output (`smoke-test-args` changes
+  the arguments; empty skips the check).
 - build reproducibly: `mod_timestamp`, `-trimpath`, and archive `builds_info` and `files`
   timestamps set to `{{ .CommitDate }}`. Publishing the Homebrew casks and Scoop manifests
-  rebuilds the archives, and the workflow checks that the rebuild matches the release.
+  rebuilds the archives, and `go-release-publish` checks that the rebuild matches the release.
 
 A release holds the archives and GoReleaser's `checksums.txt`, and every archive gets a
 [build provenance attestation](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations).
@@ -145,36 +234,34 @@ Check a download with `sha256sum --ignore-missing -c checksums.txt`, and where i
 
 ### Homebrew and Scoop
 
-With `homebrew_casks` and `scoops` in `.goreleaser.yaml`, the publish job runs GoReleaser a second
-time to push them to a tap and a bucket repository. It does that with a GitHub App token that can
-write to those repositories only. Set up once per organization:
+With `homebrew_casks` and `scoops` in `.goreleaser.yaml`, `go-release-publish` runs GoReleaser a
+second time to push them to a tap and a bucket repository. It does that with a GitHub App token
+that can write to those repositories only. Set up once per organization:
 
 1. Create the repositories, e.g. `homebrew-tap` (Homebrew requires the `homebrew-` prefix) and
    `scoop-bucket`. Each needs a default branch, so start them with a README.
 2. Create a GitHub App with **Contents: read and write** and no other permissions, and install
    it on those two repositories only.
-3. Add its Client ID and private key (the whole `.pem` file) as the secrets the caller passes as
-   `tap-app-client-id` and `tap-app-private-key`, e.g. `RELEASE_APP_CLIENT_ID` and
-   `RELEASE_APP_PRIVATE_KEY`, at the organization or repository level.
+3. Add its Client ID and private key (the whole `.pem` file) as secrets, e.g.
+   `RELEASE_APP_CLIENT_ID` and `RELEASE_APP_PRIVATE_KEY`, at the organization or repository
+   level, and pass them as `app-client-id` and `app-private-key`.
 
-The `Check tap app` job creates the same token on every run of the workflow, pull requests
-included, and reads each tap repository with it. A missing installation, a missing Contents
-permission or secrets from the wrong app fail it there, and on a tag they stop the release
-before anything is published. Runs without the secrets (pull requests from forks, Dependabot)
-skip the check with a notice. For it to run on every pull request, drop the `paths` filter from
-the caller's `pull_request` trigger.
+The `Check tap app` job (`go-release-check-tap-app`) creates the same token on every run, pull
+requests included, and reads each tap repository with it. A missing installation, a missing
+Contents permission or secrets from the wrong app fail it there, and on a tag they stop the
+release before anything is published. Runs without the secrets (pull requests from forks,
+Dependabot) skip the check with a notice.
 
-Without the secrets or `tap-repositories`, the release is published as usual and the job notes
-that the casks and manifests were skipped. Prerelease tags never update them
-(`skip_upload: auto`).
+Prerelease tags never update the casks and manifests (`skip_upload: auto`).
 
-Everything runs on the `self-hosted` runner label. `go-ci.yml` builds and vets linux/amd64, linux/arm64,
-darwin/amd64, darwin/arm64, windows/amd64 and windows/arm64 with Go's cross compiler (`targets` changes the
-list; keep it in step with `.goreleaser.yaml`). Only the Linux x86_64 binaries and tests actually
-run; the other platforms are compiled and vetted, not executed. To also run the tests elsewhere,
-pass runners to `go-ci.yml`'s `os`, for example `'["self-hosted", "windows-latest"]'`.
+Everything runs on the `self-hosted` runner label. `go-cross-build` builds and vets linux/amd64,
+linux/arm64, darwin/amd64, darwin/arm64, windows/amd64 and windows/arm64 with Go's cross compiler
+(`targets` changes the list; keep it in step with `.goreleaser.yaml`). Only the Linux x86_64
+binaries and tests actually run; the other platforms are compiled and vetted, not executed. To
+also run the tests elsewhere, add runners to the `test` job's matrix, for example
+`os: [self-hosted, windows-latest]` with `runs-on: ${{ matrix.os }}`.
 
-`renovate.json`, for the Go modules and the pinned actions and workflows:
+`renovate.json`, for the Go modules and the pinned actions:
 
 ```json
 {
@@ -185,13 +272,13 @@ pass runners to `go-ci.yml`'s `os`, for example `'["self-hosted", "windows-lates
 }
 ```
 
-`go-ci.yml` sets `GOTOOLCHAIN=local`, so Go never downloads a different toolchain: CI tests
+The Go actions set `GOTOOLCHAIN=local`, so Go never downloads a different toolchain: CI tests
 with the latest stable Go, and with exactly the `go` version from go.mod. The `go` line is the
 minimum supported Go version. Raise it only when the code or a dependency needs a newer
 release, and keep it within the [releases Go supports](https://go.dev/doc/devel/release#policy).
 
-[`test-go-workflows.yml`](.github/workflows/test-go-workflows.yml) runs both workflows against
-[`testdata/go-app`](testdata/go-app) on every pull request here.
+[`test-go-actions.yml`](.github/workflows/test-go-actions.yml) runs the Go actions against
+[`testdata/go-app`](testdata/go-app) on every pull request here, with the same jobs.
 
 ## Releasing
 
