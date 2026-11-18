@@ -40,10 +40,10 @@ on:
       targets:
         description: >-
           Space-separated `goos/goarch` pairs that the cross-build job builds
-          and vets (tests included), with cgo off. Match go-release.yml's
-          `targets`.
+          and vets (tests included), with cgo off. Match the builds in the
+          caller's `.goreleaser.yaml`.
         type: string
-        default: linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64
+        default: linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64
       main-packages:
         description: >-
           Space-separated main packages, relative to `working-directory`, for

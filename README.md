@@ -169,7 +169,7 @@ that the casks and manifests were skipped. Prerelease tags never update them
 (`skip_upload: auto`).
 
 Everything runs on the `self-hosted` runner label. `go-ci.yml` builds and vets linux/amd64, linux/arm64,
-darwin/amd64, darwin/arm64 and windows/amd64 with Go's cross compiler (`targets` changes the
+darwin/amd64, darwin/arm64, windows/amd64 and windows/arm64 with Go's cross compiler (`targets` changes the
 list; keep it in step with `.goreleaser.yaml`). Only the Linux x86_64 binaries and tests actually
 run; the other platforms are compiled and vetted, not executed. To also run the tests elsewhere,
 pass runners to `go-ci.yml`'s `os`, for example `'["self-hosted", "windows-latest"]'`.
