@@ -9,6 +9,11 @@ name: Release notes
 # such a tag, or a manual run with one, fails at the release-notes action's tag
 # check without writing anything. The release is created if it does not exist.
 #
+# claude-code-action rejects push and release events ("Unsupported event type"),
+# so on those the dispatch job only starts this workflow again by hand
+# (workflow_dispatch) for the tag, with rewrite off, and the notes are written
+# in that run.
+#
 # Claude writes the notes in a job whose GITHUB_TOKEN can only read, and may
 # only use git/gh read commands and write the notes file. A separate job with
 # contents: write puts them on the release.
@@ -24,6 +29,10 @@ on:
         description: "Version tag to write the notes for, e.g. v3.1.0"
         required: true
         type: string
+      rewrite:
+        description: "Rewrite notes this workflow already wrote for the tag"
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -38,8 +47,39 @@ env:
   TAG: ${{ inputs.tag || github.event.release.tag_name || github.ref_name }}
 
 jobs:
+  dispatch:
+    name: Start the notes run
+    if: ${{ github.event_name != 'workflow_dispatch' }}
+    runs-on: self-hosted
+    permissions:
+      contents: read
+      actions: write # start this workflow with workflow_dispatch
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: setup-gh
+
+      - uses: ./setup-gh
+
+      - name: Start this workflow for the tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WORKFLOW: ${{ github.workflow_ref }}
+          # Run the default branch's copy of this workflow, which has the rewrite
+          # input even when the tag points at an older commit.
+          REF: ${{ github.event.repository.default_branch }}
+        run: |
+          # workflow_ref is owner/repo/.github/workflows/<file>@<ref>; gh wants the file name.
+          workflow=${WORKFLOW%@*}
+          workflow=${workflow##*/}
+          gh workflow run "$workflow" --repo "$GITHUB_REPOSITORY" --ref "$REF" \
+            -f tag="$TAG" -f rewrite=false
+          echo "::notice::Started $workflow for $TAG; the notes are written in that run."
+
   write:
     name: Write notes
+    if: ${{ github.event_name == 'workflow_dispatch' }}
     runs-on: self-hosted
     permissions:
       contents: read
@@ -58,7 +98,7 @@ jobs:
         with:
           claude-code-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           tag: ${{ env.TAG }}
-          rewrite: ${{ github.event_name == 'workflow_dispatch' }}
+          rewrite: ${{ inputs.rewrite }}
           about: >-
             Composite GitHub Actions (each `<name>/action.yml`) and reusable workflows
             (`.github/workflows/go-ci.yml`, `.github/workflows/go-release.yml`) that other
@@ -69,7 +109,7 @@ jobs:
   publish:
     name: Publish notes
     needs: write
-    if: ${{ needs.write.outputs.skip != 'true' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && needs.write.outputs.skip != 'true' }}
     runs-on: self-hosted
     permissions:
       contents: write # create the release, or edit its notes
