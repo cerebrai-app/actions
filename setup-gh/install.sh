@@ -13,7 +13,7 @@
 set -euo pipefail
 
 # renovate: datasource=github-releases depName=cli/cli
-DEFAULT_GH_VERSION=v2.104.0
+DEFAULT_GH_VERSION=v2.105.0
 
 version="${GH_VERSION:-$DEFAULT_GH_VERSION}"
 version="${version#v}"
