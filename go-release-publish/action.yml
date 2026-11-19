@@ -98,7 +98,7 @@ runs:
     # GoReleaser rebuilds and pushes the casks and manifests. Its `release`
     # section is disabled, and its only token is the app's, which can write to
     # the tap repositories and nothing else.
-    - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+    - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
       if: ${{ inputs.app-client-id != '' && inputs.tap-repositories != '' }}
       with:
         go-version: ${{ inputs.go-version }}
