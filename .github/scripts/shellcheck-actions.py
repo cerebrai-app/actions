@@ -38,8 +38,9 @@ for path in sorted(glob.glob("*/action.yml")):
         else:
             print(f"ok {path} ({name})")
 
-# Scripts that composite actions run from their own directory, such as setup-gh/install.sh.
-for path in sorted(glob.glob("*/*.sh")):
+# Scripts that composite actions run from their own directory, such as
+# setup-gh/install.sh, and the repository's own, such as release.sh.
+for path in sorted(glob.glob("*.sh") + glob.glob("*/*.sh")):
     result = subprocess.run(["shellcheck", "--format=gcc", path], capture_output=True, text=True)
     if result.returncode != 0:
         failed = True

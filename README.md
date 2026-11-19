@@ -284,8 +284,20 @@ release, and keep it within the [releases Go supports](https://go.dev/doc/devel/
 
 ## Releasing
 
-Tag a commit on `main` with `v<major>.<minor>.<patch>`, then move the `v<major>` tag to it. A
-breaking change to an input bumps the major version.
+Run [`release.sh`](release.sh) from any branch with a clean working tree:
+
+```sh
+./release.sh minor        # or patch, major, or an exact version such as v4.3.0
+./release.sh -n minor     # dry run: check everything, tag nothing
+```
+
+It switches to `main` and fast-forwards it to `origin/main`, checks that the version is new and
+higher than every earlier release and that every CI check on the commit passed (it reads them
+with `gh`), shows the commits since the last release and asks for confirmation. Then it pushes an
+annotated `v<major>.<minor>.<patch>` tag and moves the `v<major>` tag to the same commit, in one
+atomic push that fails if someone else moved `v<major>` in the meantime. A new input or step is a
+minor release, a fix a patch; a breaking change to an input bumps the major version, which starts
+a new `v<major>` tag.
 
 Pushing the `v<major>.<minor>.<patch>` tag runs
 [`release-notes.yml`](.github/workflows/release-notes.yml), which uses this repository's own
