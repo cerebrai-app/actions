@@ -20,3 +20,8 @@ func TestUsage(t *testing.T) {
 		t.Error("expected a usage error without arguments")
 	}
 }
+
+// TestSkipped checks that go-test reports skipped tests as notices.
+func TestSkipped(t *testing.T) {
+	t.Skip("go-test should show this as a notice")
+}

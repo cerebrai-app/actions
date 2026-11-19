@@ -93,11 +93,32 @@ runs:
         go env CGO_ENABLED
 
     # The Windows runner does not set up a C compiler for Go, so its tests run
-    # without the race detector.
+    # without the race detector. -v is only there to see skipped tests, which
+    # go test prints nowhere else; the full output is folded, and each skip
+    # becomes a notice so a test that never runs on some OS shows up.
     - name: go test
       shell: bash
       working-directory: ${{ inputs.working-directory }}
-      run: go test ${{ inputs.race == 'true' && runner.os != 'Windows' && '-race' || '' }} ./...
+      run: |
+        log="$RUNNER_TEMP/go-test.log"
+        echo "::group::go test -v output"
+        status=0
+        go test -v ${{ inputs.race == 'true' && runner.os != 'Windows' && '-race' || '' }} ./... 2>&1 | tee "$log" || status=$?
+        echo "::endgroup::"
+        # Show the failures and the package results outside the fold.
+        grep -E '^(--- FAIL|FAIL|ok|panic:)|^\s+--- FAIL' "$log" || true
+        # The t.Skip message is the test's last log line, printed under the
+        # "=== RUN/CONT/NAME <test>" line that precedes it.
+        awk '
+          /^=== (RUN|CONT|NAME) / { test = $3; next }
+          /^ *--- SKIP: / { print $3 (($3 in msg) ? ": " msg[$3] : ""); next }
+          /^ +[^ -][^ ]*\.go:[0-9]+: / { line = $0; sub(/^ +/, "", line); msg[test] = line }
+        ' "$log" |
+          while IFS= read -r skip; do
+            skip=${skip//'%'/'%25'}
+            echo "::notice title=Skipped test (${{ runner.os }})::$skip"
+          done
+        exit "$status"
 
     - name: Smoke test
       if: ${{ inputs.smoke-test-args != '' }}
