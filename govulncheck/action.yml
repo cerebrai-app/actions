@@ -30,5 +30,5 @@ runs:
       working-directory: ${{ inputs.working-directory }}
       env:
         # renovate: datasource=go depName=golang.org/x/vuln
-        GOVULNCHECK_VERSION: v1.9.0
+        GOVULNCHECK_VERSION: v1.10.0
       run: go run "golang.org/x/vuln/cmd/govulncheck@$GOVULNCHECK_VERSION" ./...
