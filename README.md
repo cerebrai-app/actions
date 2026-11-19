@@ -14,7 +14,7 @@ Composite GitHub Actions shared by the cerebrai-app repositories.
 | [`setup-gh`](setup-gh/action.yml) | Installs the GitHub CLI (`gh`), checked against the release's checksums and kept in the runner's tool cache, for runners that don't come with it (e.g. self-hosted ones). The actions here that call `gh` already install it |
 | [`setup-jq`](setup-jq/action.yml) | Installs `jq`, checked against the release's checksums and kept in the runner's tool cache, for runners that don't come with it (e.g. self-hosted ones). The actions here that call `jq` already install it |
 | [`go-lint`](go-lint/action.yml) | gofmt, `go mod tidy -diff` and golangci-lint for a Go module |
-| [`go-test`](go-test/action.yml) | `go build` and `go test -race` on the latest stable Go or exactly the `go` version from go.mod, and an optional smoke test of each main package |
+| [`go-test`](go-test/action.yml) | `go build` and `go test -race` on the latest stable Go or exactly the `go` version from go.mod, and an optional smoke test of each main package. Each skipped test is reported as a notice, since plain `go test` hides skips |
 | [`go-cross-build`](go-cross-build/action.yml) | `go build` and `go vet` for every release platform with Go's cross compiler |
 | [`govulncheck`](govulncheck/action.yml) | Known vulnerabilities in the code paths a Go module actually calls |
 | [`go-release-build`](go-release-build/action.yml) | Tests a Go module, builds every archive with GoReleaser, runs each Linux x86_64 binary and uploads the archives for `go-release-publish`. Builds a snapshot off tags |
