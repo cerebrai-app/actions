@@ -1,6 +1,7 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": ["config:recommended", "helpers:pinGitHubActionDigests"],
+  "prHourlyLimit": 0,
   "description": "Keeps the GitHub Actions pinned in the composite actions and workflows, the pinned ponytail plugin marketplace and the pinned Renovate image, lint tools, gh and jq up to date. Only those are managed here.",
   "enabledManagers": ["github-actions", "custom.regex"],
   "customManagers": [

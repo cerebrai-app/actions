@@ -267,6 +267,7 @@ also run the tests elsewhere, add runners to the `test` job's matrix, for exampl
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": ["config:recommended", "helpers:pinGitHubActionDigests"],
+  "prHourlyLimit": 0,
   "enabledManagers": ["gomod", "github-actions"],
   "postUpdateOptions": ["gomodTidy"]
 }
