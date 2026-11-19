@@ -43,7 +43,7 @@ runs:
     # runners don't come with.
     - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
       with:
-        node-version: 24
+        node-version: 26
 
     - name: Run ponytail review
       uses: anthropics/claude-code-action@5a856893345e332afa621934082d8c660c26d689 # v1.0.282
