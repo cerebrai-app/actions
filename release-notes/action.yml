@@ -87,7 +87,7 @@ runs:
 
     - name: Write the notes with Claude Code
       if: ${{ steps.range.outputs.skip != 'true' }}
-      uses: anthropics/claude-code-action@5a856893345e332afa621934082d8c660c26d689 # v1.0.282
+      uses: anthropics/claude-code-action@eb56b6666facdbd501035f4a0269d8caee2e7a8b # v1.0.289
       env:
         GH_TOKEN: ${{ inputs.github-token }}
       with:
